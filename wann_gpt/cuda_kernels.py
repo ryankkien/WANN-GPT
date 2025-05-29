@@ -10,12 +10,14 @@ import numpy as np
 from typing import Optional, Tuple
 
 # try to import cupy for custom cuda kernels
-try:
-    import cupy as cp
-    CUPY_AVAILABLE = True
-except ImportError:
-    CUPY_AVAILABLE = False
-    cp = None
+#try:
+#    import cupy as cp
+#    CUPY_AVAILABLE = True
+#except ImportError:
+#    CUPY_AVAILABLE = False
+#    cp = None
+CUPY_AVAILABLE = False
+cp = None
 
 class CudaAttentionKernel:
     """optimized cuda kernels for attention computation with shared weights"""
