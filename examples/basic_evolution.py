@@ -99,11 +99,25 @@ def main():
     
     # run evolution
     print("starting evolution...")
+    
+    # --- Weights & Biases Logging ---
+    # W&B logging is enabled for this evolution run.
+    # To view the live experiment tracking, log in to your W&B account.
+    # The following information will be logged to W&B:
+    # - Generation statistics (best/mean fitness, complexity, diversity)
+    # - Mutation statistics for each generation
+    # - Parameters of the best individual found so far (layers, complexity, fitness, activations)
+    # - Structure of the best genome (when a new best is found)
+    # - Evaluation details for each genome (mean/std performance, performance per weight, complexity)
+    #
+    # Ensure you have W&B installed and configured (e.g., run `wandb login`).
+    log_wandb_enabled = True  # Set to False to disable W&B logging
+    
     best_genome = engine.evolve(
         dataloader=train_loader,
         task_type="classification", 
         initialization_strategy="mixed",
-        log_wandb=False  # set to true if you have wandb configured
+        log_wandb=log_wandb_enabled
     )
     
     print("evolution completed!")
