@@ -355,18 +355,6 @@ Contributions are welcome! Priority areas:
 - ⚡ Performance optimizations and CUDA kernels
 - 📚 Documentation and tutorials
 
-## Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@misc{wann-gpt-2024,
-  title={WANN-GPT: Weight-Agnostic Neural Networks for Transformer Architectures},
-  author={Research Team},
-  year={2024},
-  url={https://github.com/your-username/wann-gpt}
-}
-```
 
 ## References
 
