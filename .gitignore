@@ -1,0 +1,9 @@
+/wandb
+/demo_results
+/demo_benchmark
+*.pyc
+/wann_gpt.egg-info
+*.json
+*.pkl
+*.json
+*.pkl
