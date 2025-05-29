@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 import sys
+from typing import Optional # Added for type hinting
 
 # Add project root to path (if needed, like in run_demo.py)
 project_root = Path(__file__).resolve().parent.parent # Adjust if your script is in a subdirectory
@@ -8,11 +9,25 @@ sys.path.insert(0, str(project_root))
 
 from wann_gpt import load_config, EvolutionEngine, SharedWeightEvaluator, load_classification_data # Import necessary components
 
-def main(config_file_path: str):
-    print(f"Loading configuration from: {config_file_path}")
+def main(config_file_path: Optional[str] = None, preset_name: Optional[str] = None): # Modified signature
+    config = None # Initialize config
     
     try:
-        config = load_config(config_path=config_file_path)
+        if config_file_path:
+            print(f"Loading configuration from file: {config_file_path}")
+            config = load_config(config_path=config_file_path)
+        elif preset_name:
+            print(f"Loading configuration from preset: {preset_name}")
+            config = load_config(preset=preset_name)
+        else:
+            # This case should be prevented by argparse mutually exclusive group
+            print("Error: No configuration source specified. Use --config_file or --preset.")
+            return
+        
+        if not config:
+            print("Error: Failed to load configuration.")
+            return
+
         print(f"Successfully loaded configuration: {config.experiment_name}")
         print(f"Number of generations set to: {config.evolution.num_generations}")
         print(f"Population size: {config.evolution.population_size}")
@@ -75,19 +90,25 @@ def main(config_file_path: str):
         print("--- Evolution Demo Finished ---")
 
     except FileNotFoundError:
-        print(f"Error: Configuration file not found at {config_file_path}")
+        print(f"Error: Configuration file not found at {config_file_path}") # Added FileNotFoundError back
     except Exception as e:
         print(f"An error occurred: {e}")
         # import traceback
         # traceback.print_exc() # For more detailed error information
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run WANN-GPT evolution with a specific configuration file.")
-    parser.add_argument(
-        "config_file", 
+    parser = argparse.ArgumentParser(description="Run WANN-GPT evolution with a specific configuration.")
+    group = parser.add_mutually_exclusive_group(required=True) # Make one of them required
+    group.add_argument(
+        "--config_file", 
         type=str, 
         help="Path to the YAML or JSON configuration file."
     )
+    group.add_argument(
+        "--preset",
+        type=str,
+        help="Name of the preset configuration to use (e.g., 'debug', 'classification_large')."
+    )
     args = parser.parse_args()
     
-    main(args.config_file) 
+    main(config_file_path=args.config_file, preset_name=args.preset) 

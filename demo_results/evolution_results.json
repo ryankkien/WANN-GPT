@@ -34,8 +34,8 @@
       "mean_fitness": 1.0,
       "std_fitness": 0.0,
       "best_complexity": 6528,
-      "mean_complexity": 62233.6,
-      "diversity_score": 58.0672
+      "mean_complexity": 49126.4,
+      "diversity_score": 41.9216
     },
     {
       "generation": 1,
@@ -43,17 +43,17 @@
       "mean_fitness": 1.0,
       "std_fitness": 0.0,
       "best_complexity": 6528,
-      "mean_complexity": 29465.6,
-      "diversity_score": 33.3296
+      "mean_complexity": 32742.4,
+      "diversity_score": 14.507200000000001
     },
     {
       "generation": 2,
       "best_fitness": 1.0,
-      "mean_fitness": 0.8,
-      "std_fitness": 0.4,
+      "mean_fitness": 1.0,
+      "std_fitness": 0.0,
       "best_complexity": 6528,
-      "mean_complexity": 24550.4,
-      "diversity_score": 32.9296
+      "mean_complexity": 26188.8,
+      "diversity_score": 21.2608
     }
   ],
   "best_individual": {
@@ -119,8 +119,8 @@
           "layer_id": 0,
           "is_active": true,
           "num_heads": 2,
-          "hidden_dim": 64,
-          "activation_type": "linear",
+          "hidden_dim": 128,
+          "activation_type": "relu",
           "skip_attention": true,
           "skip_feedforward": true
         }
@@ -134,7 +134,7 @@
       "fitness_scores": {
         "classification": 1.0
       },
-      "complexity_score": 31104,
+      "complexity_score": 39296,
       "generation": 2
     },
     {
@@ -166,72 +166,57 @@
     {
       "embed_dim": 64,
       "vocab_size": 100,
-      "max_layers": 12,
-      "max_heads": 16,
-      "layers": [],
-      "connections": [
-        {
-          "from_layer": -1,
-          "to_layer": -2,
-          "connection_type": "direct",
-          "weight": 1.0,
-          "is_active": true
-        }
-      ],
-      "num_classes": 2,
-      "max_length": 32,
-      "dropout": 0.1,
-      "embedding_type": "random",
-      "causal": true,
-      "fitness_scores": {
-        "classification": 1.0
-      },
-      "complexity_score": 6528,
-      "generation": 2
-    },
-    {
-      "embed_dim": 64,
-      "vocab_size": 100,
-      "max_layers": 12,
-      "max_heads": 16,
+      "max_layers": 3,
+      "max_heads": 3,
       "layers": [
         {
           "layer_id": 0,
           "is_active": true,
-          "num_heads": 5,
+          "num_heads": 1,
           "hidden_dim": 128,
-          "activation_type": "relu",
-          "skip_attention": true,
-          "skip_feedforward": true
-        },
-        {
-          "layer_id": 1,
-          "is_active": true,
-          "num_heads": 5,
-          "hidden_dim": 128,
-          "activation_type": "relu",
+          "activation_type": "step",
           "skip_attention": true,
           "skip_feedforward": true
         }
       ],
-      "connections": [
-        {
-          "from_layer": 0,
-          "to_layer": 1,
-          "connection_type": "feedforward",
-          "weight": 1.0,
-          "is_active": true
-        }
-      ],
+      "connections": [],
       "num_classes": 2,
       "max_length": 32,
       "dropout": 0.1,
       "embedding_type": "random",
       "causal": true,
       "fitness_scores": {
-        "classification": 0.0
+        "classification": 1.0
       },
-      "complexity_score": 72064,
+      "complexity_score": 39296,
+      "generation": 2
+    },
+    {
+      "embed_dim": 64,
+      "vocab_size": 100,
+      "max_layers": 3,
+      "max_heads": 3,
+      "layers": [
+        {
+          "layer_id": 0,
+          "is_active": true,
+          "num_heads": 1,
+          "hidden_dim": 128,
+          "activation_type": "step",
+          "skip_attention": true,
+          "skip_feedforward": true
+        }
+      ],
+      "connections": [],
+      "num_classes": 2,
+      "max_length": 32,
+      "dropout": 0.1,
+      "embedding_type": "random",
+      "causal": true,
+      "fitness_scores": {
+        "classification": 1.0
+      },
+      "complexity_score": 39296,
       "generation": 2
     }
   ]

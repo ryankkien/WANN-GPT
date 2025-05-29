@@ -3,10 +3,10 @@
     "accuracy": 0.8999999999999999,
     "perplexity": 0.0,
     "complexity": 111232,
-    "robustness_score": 0.9105572809000084,
+    "robustness_score": 0.888888888888889,
     "weight_sensitivity": 0.09342605043254648,
-    "ensemble_improvement": 0.10000000000000009,
-    "inference_time_per_sample": 0.0007020950317382813,
+    "ensemble_improvement": -0.09999999999999987,
+    "inference_time_per_sample": 0.0006011009216308593,
     "memory_usage_mb": 0.0
   },
   "basic_evaluation": {
@@ -17,10 +17,10 @@
     "performance_per_weight": [
       1.0,
       1.0,
+      1.0,
       0.8,
       0.8,
-      0.8,
-      1.0
+      0.8
     ],
     "weight_samples": [
       -2.5,
@@ -67,16 +67,13 @@
     "performances": [
       1.0,
       0.8,
-      1.0,
-      1.0,
       0.8,
-      1.0,
       0.8,
       0.8,
       1.0,
       1.0,
-      0.8,
-      0.8,
+      1.0,
+      1.0,
       1.0,
       1.0,
       1.0,
@@ -86,8 +83,11 @@
       1.0,
       0.8,
       1.0,
+      0.8,
       1.0,
       1.0,
+      1.0,
+      0.8,
       1.0,
       1.0,
       1.0,
@@ -103,7 +103,7 @@
     "weight_sensitivity": 0.09342605043254648
   },
   "ensemble_analysis": {
-    "ensemble_accuracy": 1.0,
+    "ensemble_accuracy": 0.8,
     "num_weight_instances": 6,
     "total_samples": 5
   }
