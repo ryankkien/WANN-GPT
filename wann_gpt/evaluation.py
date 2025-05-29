@@ -29,8 +29,9 @@ class EvaluationResult:
 class SharedWeightEvaluator:
     """evaluator for weight-agnostic architectures"""
     
-    def __init__(self, device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, device: str = "cuda" if torch.cuda.is_available() else "cpu", wandb_run=None):
         self.device = device
+        self.wandb_run = wandb_run
         
         # default weight sample range as in original wann paper
         self.default_weight_samples = [-2.5, -1.0, -0.5, 0.5, 1.0, 2.5]
@@ -250,6 +251,23 @@ class SharedWeightEvaluator:
             # update genome fitness
             genome.set_fitness(task_type, result.mean_performance)
             
+            if self.wandb_run:
+                log_data = {
+                    "eval_mean_performance": result.mean_performance,
+                    "eval_std_performance": result.std_performance,
+                    "eval_best_performance": result.best_performance,
+                    "eval_worst_performance": result.worst_performance,
+                    "eval_complexity": result.complexity,
+                    "eval_task_type": result.task_type,
+                }
+                # Log performance per weight as individual metrics
+                for i, perf in enumerate(result.performance_per_weight):
+                    # Sanitize weight value for metric name
+                    weight_str = str(result.weight_samples[i]).replace('.', '_')
+                    log_data[f"eval_perf_weight_{weight_str}"] = perf
+                
+                self.wandb_run.log(log_data)
+                
             return result
             
         except Exception as e:
@@ -276,7 +294,7 @@ class SharedWeightEvaluator:
         
         if parallel and torch.cuda.device_count() > 1:
             # implement parallel evaluation across multiple gpus
-            results = self._parallel_evaluate_genomes(genomes, dataloader, task_type, weight_samples)
+            results = self._parallel_evaluate_genomes(genomes, dataloader, task_type, weight_samples, self.wandb_run)
         else:
             # sequential evaluation
             for i, genome in enumerate(tqdm(genomes, desc=f"evaluating {task_type}")):
@@ -287,7 +305,8 @@ class SharedWeightEvaluator:
     
     def _parallel_evaluate_genomes(self, genomes: List[ArchitectureGenome],
                                  dataloader, task_type: str,
-                                 weight_samples: List[float] = None) -> List[EvaluationResult]:
+                                 weight_samples: List[float] = None,
+                                 wandb_run=None) -> List[EvaluationResult]:
         """parallel evaluation across multiple gpus"""
         
         import torch.multiprocessing as mp
@@ -302,7 +321,7 @@ class SharedWeightEvaluator:
         
         # use multiprocessing to evaluate chunks in parallel
         with mp.Pool(processes=num_gpus) as pool:
-            args = [(chunk, dataloader, task_type, weight_samples, i) 
+            args = [(chunk, dataloader, task_type, weight_samples, i, wandb_run) 
                    for i, chunk in enumerate(genome_chunks)]
             
             chunk_results = pool.starmap(self._evaluate_genome_chunk, args)
@@ -316,7 +335,8 @@ class SharedWeightEvaluator:
     
     def _evaluate_genome_chunk(self, genome_chunk: List[ArchitectureGenome],
                              dataloader, task_type: str,
-                             weight_samples: List[float], gpu_id: int) -> List[EvaluationResult]:
+                             weight_samples: List[float], gpu_id: int,
+                             wandb_run=None) -> List[EvaluationResult]:
         """evaluate chunk of genomes on specific gpu"""
         
         # set device for this process
@@ -324,7 +344,7 @@ class SharedWeightEvaluator:
         torch.cuda.set_device(gpu_id)
         
         # create evaluator for this gpu
-        evaluator = SharedWeightEvaluator(device=device)
+        evaluator = SharedWeightEvaluator(device=device, wandb_run=wandb_run)
         
         results = []
         for genome in genome_chunk:

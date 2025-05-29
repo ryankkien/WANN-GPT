@@ -306,6 +306,8 @@ class EvolutionEngine:
         
         if log_wandb:
             wandb.init(project="wann-gpt-evolution", config=self.config.__dict__)
+            if self.evaluator:  # Ensure evaluator exists
+                self.evaluator.wandb_run = wandb.run
         
         print("initializing population...")
         self.population = self.initialize_population(initialization_strategy)
@@ -327,7 +329,7 @@ class EvolutionEngine:
                   f"diversity={stats.diversity_score:.4f}")
             
             if log_wandb:
-                wandb.log({
+                log_data = {
                     "generation": generation,
                     "best_fitness": stats.best_fitness,
                     "mean_fitness": stats.mean_fitness,
@@ -335,8 +337,24 @@ class EvolutionEngine:
                     "best_complexity": stats.best_complexity,
                     "mean_complexity": stats.mean_complexity,
                     "diversity_score": stats.diversity_score,
-                    "fitness_stagnation": self.fitness_stagnation_count
-                })
+                    "fitness_stagnation": self.fitness_stagnation_count,
+                    "mutation_stats": stats.mutation_stats  # Log mutation statistics
+                }
+                
+                if self.best_individual:
+                    log_data["best_individual_details"] = {
+                        "num_layers": len(self.best_individual.get_active_layers()),
+                        "complexity": self.best_individual.calculate_complexity(),
+                        "fitness": self.best_individual.get_fitness(task_type),
+                        "activation_functions": [layer.activation_type for layer in self.best_individual.get_active_layers()]
+                    }
+                    
+                    # Log best genome structure if a new best is found
+                    # A new best is found if fitness_stagnation_count is 0
+                    if self.fitness_stagnation_count == 0:
+                        log_data["best_genome_structure"] = self.best_individual.to_dict()
+                
+                wandb.log(log_data)
             
             # save checkpoint
             if generation % 10 == 0:
