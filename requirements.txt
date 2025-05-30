@@ -1,6 +1,6 @@
 torch>=2.0.0
 torchvision
-numpy>=1.21.0
+numpy>=1.21.0,<2.0
 scipy
 matplotlib
 seaborn
@@ -16,4 +16,6 @@ jupyter
 scikit-learn
 pandas
 plotly
-pyyaml 
+pyyaml
+psutil
+GPUtil 
