@@ -99,33 +99,37 @@ class SystemMonitor:
             time.sleep(self.log_interval)
 
 def create_h100_maxed_config():
-    """create h100 optimized configuration for maximum performance"""
+    """create h100 optimized configuration for maximum performance within 80gb memory limit"""
     
     config = ConfigPresets.generation_large()  # switch to generation preset
     
-    # scale up massively for h100 80gb
-    config.model.embed_dim = 2048  # much larger embedding dimension
+    #model architecture - balanced for memory efficiency
+    config.model.embed_dim = 1536  # reduced from 2048 to save memory
     config.model.vocab_size = 50257  # full gpt-2 vocabulary
-    config.model.num_layers = 24  # deep architecture (2x gpt-2 base)
-    config.model.num_heads = 32  # many attention heads
-    config.model.max_length = 2048  # long sequences for complex tasks
+    config.model.num_layers = 20  # reduced from 24
+    config.model.num_heads = 24  # reduced from 32 (1536/24 = 64 per head)
+    config.model.max_length = 1024  # reduced from 2048 for memory
     config.model.causal = True  # ensure causal masking for generation
     
-    # massive evolution settings for h100
-    config.evolution.embed_dim = 2048
+    #evolution settings - optimized for 80gb memory limit
+    config.evolution.embed_dim = 1536
     config.evolution.vocab_size = 50257
-    config.evolution.population_size = 400  # double the population (was 200)
-    config.evolution.num_generations = 100  # extensive evolution time
+    config.evolution.population_size = 100  # drastically reduced from 400 to fit in memory
+    config.evolution.num_generations = 100  # keep extensive evolution time
     config.evolution.complexity_weight = 0.0001  # allow complex architectures
     config.evolution.mutation_rate = 0.2  # higher mutation for exploration
     config.evolution.crossover_rate = 0.8  # high crossover for mixing
-    config.evolution.elitism_rate = 0.1  # preserve 10% best individuals (40 out of 400)
+    config.evolution.elitism_rate = 0.1  # preserve 10% best individuals (10 out of 100)
     config.evolution.tournament_size = 5  # higher selection pressure
     config.evolution.fitness_stagnation_threshold = 25  # longer patience
-    config.evolution.max_layers = 32  # allow very deep networks
-    config.evolution.max_heads = 64  # many attention heads
-    config.evolution.parallel_evaluation = True  # use all gpu cores
+    config.evolution.max_layers = 24  # reduced from 32
+    config.evolution.max_heads = 48  # reduced from 64
+    config.evolution.parallel_evaluation = False  # disable parallel to save memory
     config.evolution.selection_strategy = "tournament"  # use tournament selection for head evolution
+    
+    #memory management flags
+    config.evolution.clear_cache_between_evals = True  # clear cuda cache between evaluations
+    config.evolution.sequential_evaluation = True  # evaluate one genome at a time
     
     # fix num_heads for headonlygenome compatibility
     # gpt-2 uses 768 embed_dim with 12 heads (768/12=64 per head)
@@ -221,6 +225,11 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
     
     #initialize wandb
     if use_wandb:
+        #optionally set api key if provided via environment variable
+        wandb_api_key = os.getenv("WANDB_API_KEY")
+        if wandb_api_key:
+            wandb.login(key=wandb_api_key)
+        
         wandb.init(
             project="wann-gpt-h100-evolution",
             name=f"h100-maxed-{dataset_name}-{int(time.time())}",
@@ -487,16 +496,26 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
     return best_genome, benchmark_result
 
 def estimate_h100_memory_usage(config):
-    """estimate memory usage for h100 configuration"""
+    """estimate memory usage for h100 configuration with more accurate calculation"""
     
-    # rough estimates based on model size
+    #model parameters
     embed_params = config.model.vocab_size * config.model.embed_dim
-    attention_params = config.model.num_layers * config.model.num_heads * config.model.embed_dim * config.model.embed_dim
-    total_params = (embed_params + attention_params) * config.evolution.population_size
+    attention_params = config.model.num_layers * 4 * config.model.embed_dim * config.model.embed_dim  # q,k,v,o projections
+    ffn_params = config.model.num_layers * 2 * config.model.embed_dim * (4 * config.model.embed_dim)  # mlp layers
+    total_model_params = embed_params + attention_params + ffn_params
     
-    # memory in gb (rough estimate)
-    memory_gb = total_params * 4 / 1e9  # 4 bytes per float32
-    return memory_gb * 1.5  # add overhead
+    #memory per model (including gradients and optimizer states)
+    memory_per_model_gb = total_model_params * 4 * 3 / 1e9  # params + gradients + optimizer states
+    
+    #batch memory
+    batch_memory_gb = (config.data.batch_size * config.data.max_length * config.model.embed_dim * 4) / 1e9
+    
+    #total memory estimate
+    #note: with sequential evaluation, we only keep one model active at a time
+    active_models = 1  # sequential evaluation
+    memory_gb = (memory_per_model_gb * active_models + batch_memory_gb) * 1.5  # 1.5x for overhead
+    
+    return memory_gb
 
 def estimate_runtime(config):
     """estimate runtime in hours"""
