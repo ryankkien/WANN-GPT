@@ -119,12 +119,19 @@ def create_h100_maxed_config():
     config.evolution.complexity_weight = 0.0001  # allow complex architectures
     config.evolution.mutation_rate = 0.2  # higher mutation for exploration
     config.evolution.crossover_rate = 0.8  # high crossover for mixing
-    config.evolution.elite_size = 40  # preserve many best individuals (double)
+    config.evolution.elitism_rate = 0.1  # preserve 10% best individuals (40 out of 400)
     config.evolution.tournament_size = 5  # higher selection pressure
     config.evolution.fitness_stagnation_threshold = 25  # longer patience
     config.evolution.max_layers = 32  # allow very deep networks
     config.evolution.max_heads = 64  # many attention heads
     config.evolution.parallel_evaluation = True  # use all gpu cores
+    config.evolution.selection_strategy = "tournament"  # use tournament selection for head evolution
+    
+    # fix num_heads for headonlygenome compatibility
+    # gpt-2 uses 768 embed_dim with 12 heads (768/12=64 per head)
+    # for 2048 embed_dim, valid num_heads could be: 16 (128 per head), 32 (64 per head), or 64 (32 per head)
+    config.evolution.num_heads = 32  # set to 32 so 2048/32 = 64 per head
+    config.evolution.num_layers = 24  # explicitly set for headonlygenome
     
     # maximize batch size for h100 memory - aggressive scaling since only using 4.6gb/81gb
     config.data.batch_size = 512  # massive increase from 64 (8x larger)
@@ -168,12 +175,18 @@ def create_h100_conservative_config():
     config.evolution.complexity_weight = 0.0002
     config.evolution.mutation_rate = 0.18
     config.evolution.crossover_rate = 0.75
-    config.evolution.elite_size = 15
+    config.evolution.elitism_rate = 0.1  # preserve 10% best individuals (15 out of 150)
     config.evolution.tournament_size = 4
     config.evolution.fitness_stagnation_threshold = 20
     config.evolution.max_layers = 24
     config.evolution.max_heads = 48
     config.evolution.parallel_evaluation = True
+    config.evolution.selection_strategy = "tournament"  # use tournament selection for head evolution
+    
+    # fix num_heads for headonlygenome compatibility
+    # for 1536 embed_dim: valid num_heads are 12 (128 per head), 16 (96), 24 (64), 32 (48), 48 (32)
+    config.evolution.num_heads = 24  # set to 24 so 1536/24 = 64 per head
+    config.evolution.num_layers = 18  # explicitly set for headonlygenome
     
     # conservative but substantial batch size increase
     config.data.batch_size = 256  # 4x increase from current
@@ -259,7 +272,7 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
         "evolution/num_generations": config.evolution.num_generations,
         "evolution/mutation_rate": config.evolution.mutation_rate,
         "evolution/crossover_rate": config.evolution.crossover_rate,
-        "evolution/elite_size": config.evolution.elite_size,
+        "evolution/elitism_rate": config.evolution.elitism_rate,
         "evolution/tournament_size": config.evolution.tournament_size,
         "evolution/max_layers": config.evolution.max_layers,
         "evolution/max_heads": config.evolution.max_heads,
@@ -343,8 +356,10 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
             "evolution/avg_complexity": sum(complexity_stats) / len(complexity_stats),
             "evolution/max_complexity": max(complexity_stats),
             "evolution/min_complexity": min(complexity_stats),
-            "evolution/best_genome_layers": len(best_genome.layer_configs) if best_genome else 0,
-            "evolution/best_genome_heads": sum(layer.get('num_heads', 0) for layer in best_genome.layer_configs) if best_genome else 0
+            "evolution/best_genome_layers": best_genome.num_layers if best_genome else 0,
+            "evolution/best_genome_heads": best_genome.num_heads if best_genome else 0,
+            "evolution/lm_head_sparsity": best_genome.lm_head_sparsity if best_genome else 0,
+            "evolution/classifier_sparsity": best_genome.classifier_sparsity if best_genome else 0
         }
         
         if use_wandb:
@@ -368,7 +383,7 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
             
             #call our tracking callback
             evolution_callback(
-                generation=evolution_engine.current_generation if hasattr(evolution_engine, 'current_generation') else 0,
+                generation=evolution_engine.generation,
                 population=population,
                 best_fitness=best_fitness,
                 avg_fitness=avg_fitness,
@@ -408,14 +423,16 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
                 "results/evolution_time_hours": evolution_time / 3600,
                 "results/best_fitness": best_genome.get_fitness('generation'),
                 "results/best_complexity": best_genome.calculate_complexity(),
-                "results/final_layers": len(best_genome.layer_configs),
-                "results/final_heads": sum(layer.get('num_heads', 0) for layer in best_genome.layer_configs)
+                "results/final_layers": best_genome.num_layers,
+                "results/final_heads": best_genome.num_heads,
+                "results/final_lm_head_sparsity": best_genome.lm_head_sparsity,
+                "results/final_classifier_sparsity": best_genome.classifier_sparsity
             })
         
         # comprehensive benchmarking
         print(f"\nrunning h100 comprehensive benchmark...")
         
-        model = evaluator.instantiate_from_genome(best_genome)
+        model = evaluator.instantiate_hybrid_from_genome(best_genome)  # use the correct method for hybrid models
         benchmark_suite = WannBenchmarkSuite(device="cuda")
         
         benchmark_result = benchmark_suite.comprehensive_benchmark(

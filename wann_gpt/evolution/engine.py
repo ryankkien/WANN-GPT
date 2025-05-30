@@ -499,6 +499,11 @@ class HeadOnlyEvolutionEngine:
             for _ in range(dense_count):
                 genome = HeadOnlyGenome.create_dense(
                     self.config.embed_dim, self.config.vocab_size, self.config.num_classes)
+                #set num_heads and num_layers from config
+                if hasattr(self.config, 'num_heads'):
+                    genome.num_heads = self.config.num_heads
+                if hasattr(self.config, 'num_layers'):
+                    genome.num_layers = self.config.num_layers
                 population.append(genome)
             
             # 40% sparse heads with varying sparsity
@@ -507,6 +512,11 @@ class HeadOnlyEvolutionEngine:
                 sparsity = random.uniform(0.1, 0.7)
                 genome = HeadOnlyGenome.create_sparse(
                     self.config.embed_dim, self.config.vocab_size, self.config.num_classes, sparsity)
+                #set num_heads and num_layers from config
+                if hasattr(self.config, 'num_heads'):
+                    genome.num_heads = self.config.num_heads
+                if hasattr(self.config, 'num_layers'):
+                    genome.num_layers = self.config.num_layers
                 population.append(genome)
             
             # 30% random connection patterns
@@ -520,6 +530,11 @@ class HeadOnlyEvolutionEngine:
             for _ in range(self.config.population_size):
                 genome = HeadOnlyGenome.create_dense(
                     self.config.embed_dim, self.config.vocab_size, self.config.num_classes)
+                #set num_heads and num_layers from config
+                if hasattr(self.config, 'num_heads'):
+                    genome.num_heads = self.config.num_heads
+                if hasattr(self.config, 'num_layers'):
+                    genome.num_layers = self.config.num_layers
                 population.append(genome)
         
         elif initialization_strategy == "sparse":
@@ -528,6 +543,11 @@ class HeadOnlyEvolutionEngine:
                 sparsity = random.uniform(0.3, 0.8)
                 genome = HeadOnlyGenome.create_sparse(
                     self.config.embed_dim, self.config.vocab_size, self.config.num_classes, sparsity)
+                #set num_heads and num_layers from config
+                if hasattr(self.config, 'num_heads'):
+                    genome.num_heads = self.config.num_heads
+                if hasattr(self.config, 'num_layers'):
+                    genome.num_layers = self.config.num_layers
                 population.append(genome)
         
         return population
@@ -540,12 +560,18 @@ class HeadOnlyEvolutionEngine:
             num_classes=self.config.num_classes
         )
         
-        # random sparsity levels
+        #set num_heads and num_layers from config to ensure compatibility
+        if hasattr(self.config, 'num_heads'):
+            genome.num_heads = self.config.num_heads
+        if hasattr(self.config, 'num_layers'):
+            genome.num_layers = self.config.num_layers
+        
+        #random sparsity levels
         genome.lm_head_sparsity = random.uniform(0.0, 0.8)
         if genome.num_classes is not None:
             genome.classifier_sparsity = random.uniform(0.0, 0.8)
         
-        # generate random connection patterns
+        #generate random connection patterns
         genome.randomize_connections()
         
         return genome
