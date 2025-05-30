@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 
 from .architecture.transformer import WannGPT
+from .architecture import HybridWannGPT
 from .evolution.genome import ArchitectureGenome
 
 @dataclass
@@ -517,4 +518,66 @@ class SharedWeightEvaluator:
                 "mean_complexity": np.mean([r.complexity for r in generation_results])
             }
         
-        return summary 
+        return summary
+    
+    def instantiate_hybrid_from_genome(self, genome, 
+                                      model_name: str = "gpt2", 
+                                      freeze_backbone: bool = True):
+        """create hybrid wanngpt model with pretrained backbone + evolved heads"""
+        
+        # handle both HeadOnlyGenome and ArchitectureGenome
+        if hasattr(genome, 'lm_head_sparsity'):
+            # this is a HeadOnlyGenome
+            model = HybridWannGPT(
+                vocab_size=genome.vocab_size,
+                embed_dim=genome.embed_dim,
+                num_layers=genome.num_layers,
+                num_heads=genome.num_heads,
+                max_length=genome.max_length,
+                dropout=genome.dropout,
+                num_classes=genome.num_classes,
+                model_name=model_name,
+                freeze_backbone=freeze_backbone
+            )
+            
+            # apply sparsity-based pruning to heads
+            if genome.lm_head_sparsity > 0:
+                keep_prob = 1.0 - genome.lm_head_sparsity
+                model.lm_head.prune_connections(keep_prob)
+            
+            if hasattr(model, 'classifier') and genome.classifier_sparsity > 0:
+                keep_prob = 1.0 - genome.classifier_sparsity
+                model.classifier.prune_connections(keep_prob)
+            
+            # apply specific connection masks if provided
+            if genome.lm_head_connections:
+                model.lm_head.connection_mask = torch.tensor(genome.lm_head_connections, dtype=torch.float32)
+            
+            if hasattr(model, 'classifier') and genome.classifier_connections:
+                model.classifier.connection_mask = torch.tensor(genome.classifier_connections, dtype=torch.float32)
+                
+        else:
+            # this is a regular ArchitectureGenome, use existing logic
+            model = HybridWannGPT(
+                vocab_size=genome.vocab_size,
+                embed_dim=genome.embed_dim,
+                num_layers=genome.num_layers or 12,
+                num_heads=genome.num_heads or 12,
+                max_length=genome.max_length,
+                dropout=genome.dropout,
+                num_classes=genome.num_classes,
+                model_name=model_name,
+                freeze_backbone=freeze_backbone
+            )
+            
+            # apply connection masks if specified
+            if hasattr(genome, 'lm_head_connections') and genome.lm_head_connections:
+                model.lm_head.connection_mask = torch.tensor(genome.lm_head_connections, dtype=torch.float32)
+            
+            if hasattr(model, 'classifier') and hasattr(genome, 'classifier_connections') and genome.classifier_connections:
+                model.classifier.connection_mask = torch.tensor(genome.classifier_connections, dtype=torch.float32)
+        
+        # ensure model is on the correct device
+        model = model.to(self.device)
+        
+        return model 

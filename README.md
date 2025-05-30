@@ -49,6 +49,24 @@ Weight-Agnostic Neural Networks demonstrate that network architecture alone can 
 - Memory-efficient attention computation
 - Multi-GPU support for large populations
 
+### 🔄 **Hybrid Architecture (NEW)**
+- **Frozen GPT-2 Backbone**: Keeps original pretrained GPT-2 transformer layers intact
+- **Evolutionary Output Heads**: Only the final linear layers are weight-agnostic and evolved
+- **Best of Both Worlds**: Combines pretrained transformer representations with WANN search
+- **Head-Only Evolution**: Specialized evolution engine for optimizing connection patterns in output heads
+
+## Architecture Options
+
+This project now supports two evolution approaches:
+
+| Component | Original WANN-GPT | Hybrid WANN-GPT |
+|-----------|-------------------|-----------------|
+| Embeddings | Weight-agnostic, fixed | Pretrained GPT-2 |
+| Transformer Layers | Weight-agnostic, evolvable | Pretrained GPT-2 (frozen) |
+| Output Heads | Weight-agnostic | Weight-agnostic, evolvable |
+| Shared Weight | Entire network | Output heads only |
+| Evolution Target | Full architecture | Head connections only |
+
 ## Installation
 
 ```bash
@@ -134,6 +152,51 @@ best_genome = engine.evolve(
 # Generate text samples
 model = evaluator.instantiate_from_genome(best_genome)
 generated = model.generate(prompt_tokens, max_new_tokens=20)
+```
+
+### 🔄 **Hybrid Architecture (GPT-2 + WANN Heads)**
+
+```python
+from wann_gpt import HybridWannGPT, HeadOnlyEvolutionEngine, HeadOnlyGenome
+
+# Load configuration for hybrid evolution
+config = load_config(preset="classification_small")
+config.model.embed_dim = 768  # GPT-2 embedding dimension
+config.model.vocab_size = 50257  # GPT-2 vocabulary size
+
+# Load dataset
+train_loader, test_loader, num_classes = load_classification_data(
+    dataset_name="imdb",
+    vocab_size=config.model.vocab_size,
+    max_length=config.model.max_length,
+    batch_size=config.data.batch_size
+)
+
+# Create evaluator
+evaluator = SharedWeightEvaluator()
+
+# Run head-only evolution with frozen GPT-2 backbone
+head_engine = HeadOnlyEvolutionEngine(
+    config=config.evolution,
+    evaluator=evaluator,
+    model_name="gpt2"  # use pretrained GPT-2
+)
+
+# Evolve only the output heads
+best_head_genome = head_engine.evolve(
+    train_loader, 
+    task_type="classification",
+    initialization_strategy="mixed"
+)
+
+# Create final hybrid model
+best_model = evaluator.instantiate_hybrid_from_genome(
+    best_head_genome, 
+    model_name="gpt2"
+)
+
+print(f"Best head fitness: {best_head_genome.get_fitness('classification'):.4f}")
+print(f"Head complexity: {best_head_genome.calculate_complexity()}")
 ```
 
 ### 🔬 **Comprehensive Benchmarking**

@@ -401,4 +401,207 @@ class ArchitectureGenome:
         genome.complexity_score = data.get('complexity_score', 0)
         genome.generation = data.get('generation', 0)
         
+        return genome
+
+class HeadOnlyGenome:
+    """specialized genome for evolving only output heads with frozen gpt-2 backbone"""
+    
+    def __init__(self, embed_dim: int = 768, vocab_size: int = 50257,
+                 num_classes: Optional[int] = None):
+        self.embed_dim = embed_dim
+        self.vocab_size = vocab_size
+        self.num_classes = num_classes
+        
+        # gpt-2 backbone parameters (frozen)
+        self.num_layers = 12  # standard gpt-2
+        self.num_heads = 12   # standard gpt-2
+        self.max_length = 1024
+        self.dropout = 0.1
+        self.causal = True
+        
+        # evolvable head parameters
+        self.lm_head_sparsity = 0.0  # fraction of connections to prune
+        self.classifier_sparsity = 0.0  # for classification head
+        
+        # connection masks for heads (if specific patterns needed)
+        self.lm_head_connections: Optional[List[List[int]]] = None
+        self.classifier_connections: Optional[List[List[int]]] = None
+        
+        # fitness tracking
+        self.fitness_scores: Dict[str, float] = {}
+        self.complexity_score: int = 0
+        self.generation: int = 0
+    
+    @classmethod
+    def create_dense(cls, embed_dim: int = 768, vocab_size: int = 50257,
+                    num_classes: Optional[int] = None) -> 'HeadOnlyGenome':
+        """create genome with fully connected heads"""
+        genome = cls(embed_dim, vocab_size, num_classes)
+        genome.lm_head_sparsity = 0.0
+        genome.classifier_sparsity = 0.0
+        return genome
+    
+    @classmethod 
+    def create_sparse(cls, embed_dim: int = 768, vocab_size: int = 50257,
+                     num_classes: Optional[int] = None,
+                     sparsity: float = 0.5) -> 'HeadOnlyGenome':
+        """create genome with sparse heads"""
+        genome = cls(embed_dim, vocab_size, num_classes)
+        genome.lm_head_sparsity = sparsity
+        genome.classifier_sparsity = sparsity
+        return genome
+    
+    def mutate_sparsity(self, mutation_rate: float = 0.1):
+        """mutate sparsity levels of heads"""
+        if np.random.random() < mutation_rate:
+            # mutate lm head sparsity
+            delta = np.random.normal(0, 0.1)
+            self.lm_head_sparsity = np.clip(self.lm_head_sparsity + delta, 0.0, 0.9)
+        
+        if np.random.random() < mutation_rate and self.num_classes is not None:
+            # mutate classifier sparsity
+            delta = np.random.normal(0, 0.1)
+            self.classifier_sparsity = np.clip(self.classifier_sparsity + delta, 0.0, 0.9)
+    
+    def randomize_connections(self):
+        """randomly generate connection masks for heads"""
+        # language modeling head connections
+        lm_keep_prob = 1.0 - self.lm_head_sparsity
+        lm_mask = (np.random.random((self.vocab_size, self.embed_dim)) < lm_keep_prob).astype(int)
+        self.lm_head_connections = lm_mask.tolist()
+        
+        # classification head connections (if applicable)
+        if self.num_classes is not None:
+            cls_keep_prob = 1.0 - self.classifier_sparsity
+            cls_mask = (np.random.random((self.num_classes, self.embed_dim)) < cls_keep_prob).astype(int)
+            self.classifier_connections = cls_mask.tolist()
+    
+    def calculate_complexity(self) -> int:
+        """calculate complexity based on active connections in heads"""
+        complexity = 0
+        
+        # language modeling head complexity
+        if self.lm_head_connections:
+            complexity += sum(sum(row) for row in self.lm_head_connections)
+        else:
+            # estimate based on sparsity
+            total_lm_connections = self.vocab_size * self.embed_dim
+            complexity += int(total_lm_connections * (1.0 - self.lm_head_sparsity))
+        
+        # classification head complexity
+        if self.num_classes is not None:
+            if self.classifier_connections:
+                complexity += sum(sum(row) for row in self.classifier_connections)
+            else:
+                # estimate based on sparsity
+                total_cls_connections = self.num_classes * self.embed_dim
+                complexity += int(total_cls_connections * (1.0 - self.classifier_sparsity))
+        
+        self.complexity_score = complexity
+        return complexity
+    
+    def set_fitness(self, task: str, score: float):
+        """set fitness score for specific task"""
+        self.fitness_scores[task] = score
+    
+    def get_fitness(self, task: str) -> float:
+        """get fitness score for specific task"""
+        return self.fitness_scores.get(task, 0.0)
+    
+    def get_multi_objective_score(self, complexity_weight: float = 0.01) -> Tuple[float, int]:
+        """get multi-objective score combining performance and complexity"""
+        # use average fitness across all tasks
+        avg_fitness = np.mean(list(self.fitness_scores.values())) if self.fitness_scores else 0.0
+        complexity = self.calculate_complexity()
+        
+        # penalize high complexity
+        combined_score = avg_fitness - complexity_weight * complexity
+        
+        return combined_score, complexity
+    
+    def clone(self) -> 'HeadOnlyGenome':
+        """create a copy of this genome"""
+        clone = HeadOnlyGenome(self.embed_dim, self.vocab_size, self.num_classes)
+        clone.lm_head_sparsity = self.lm_head_sparsity
+        clone.classifier_sparsity = self.classifier_sparsity
+        
+        # deep copy connection masks
+        if self.lm_head_connections:
+            clone.lm_head_connections = [row.copy() for row in self.lm_head_connections]
+        if self.classifier_connections:
+            clone.classifier_connections = [row.copy() for row in self.classifier_connections]
+        
+        clone.fitness_scores = self.fitness_scores.copy()
+        clone.generation = self.generation
+        
+        return clone
+    
+    def crossover(self, other: 'HeadOnlyGenome') -> 'HeadOnlyGenome':
+        """create offspring through crossover"""
+        child = self.clone()
+        
+        # crossover sparsity values
+        if np.random.random() < 0.5:
+            child.lm_head_sparsity = other.lm_head_sparsity
+        if np.random.random() < 0.5:
+            child.classifier_sparsity = other.classifier_sparsity
+        
+        # crossover connection masks (if they exist)
+        if self.lm_head_connections and other.lm_head_connections:
+            # randomly mix connections
+            for i in range(len(child.lm_head_connections)):
+                for j in range(len(child.lm_head_connections[i])):
+                    if np.random.random() < 0.5:
+                        child.lm_head_connections[i][j] = other.lm_head_connections[i][j]
+        
+        if (self.classifier_connections and other.classifier_connections and 
+            child.classifier_connections):
+            for i in range(len(child.classifier_connections)):
+                for j in range(len(child.classifier_connections[i])):
+                    if np.random.random() < 0.5:
+                        child.classifier_connections[i][j] = other.classifier_connections[i][j]
+        
+        child.generation = max(self.generation, other.generation) + 1
+        return child
+    
+    def to_dict(self) -> Dict:
+        """convert genome to dictionary for serialization"""
+        return {
+            'embed_dim': self.embed_dim,
+            'vocab_size': self.vocab_size,
+            'num_classes': self.num_classes,
+            'num_layers': self.num_layers,
+            'num_heads': self.num_heads,
+            'max_length': self.max_length,
+            'dropout': self.dropout,
+            'lm_head_sparsity': self.lm_head_sparsity,
+            'classifier_sparsity': self.classifier_sparsity,
+            'lm_head_connections': self.lm_head_connections,
+            'classifier_connections': self.classifier_connections,
+            'fitness_scores': self.fitness_scores,
+            'complexity_score': self.complexity_score,
+            'generation': self.generation
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'HeadOnlyGenome':
+        """create genome from dictionary"""
+        genome = cls(
+            embed_dim=data['embed_dim'],
+            vocab_size=data['vocab_size'],
+            num_classes=data.get('num_classes')
+        )
+        
+        genome.num_layers = data.get('num_layers', 12)
+        genome.num_heads = data.get('num_heads', 12)
+        genome.max_length = data.get('max_length', 1024)
+        genome.dropout = data.get('dropout', 0.1)
+        genome.lm_head_sparsity = data.get('lm_head_sparsity', 0.0)
+        genome.classifier_sparsity = data.get('classifier_sparsity', 0.0)
+        genome.lm_head_connections = data.get('lm_head_connections')
+        genome.classifier_connections = data.get('classifier_connections')
+        genome.fitness_scores = data.get('fitness_scores', {})
+        genome.complexity_score = data.get('complexity_score', 0)
+        genome.generation = data.get('generation', 0)
+        
         return genome 

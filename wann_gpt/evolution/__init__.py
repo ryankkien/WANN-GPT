@@ -1,15 +1,17 @@
 """
-evolutionary algorithm components for wann architecture search
+Evolution components for Weight-Agnostic Neural Networks
 """
 
-from .genome import ArchitectureGenome
-from .engine import EvolutionEngine
+from .genome import ArchitectureGenome, HeadOnlyGenome
+from .engine import EvolutionEngine, HeadOnlyEvolutionEngine
 from .mutations import MutationOperators
 from .selection import SelectionStrategies
 
 __all__ = [
     "ArchitectureGenome",
-    "EvolutionEngine", 
+    "HeadOnlyGenome", 
+    "EvolutionEngine",
+    "HeadOnlyEvolutionEngine",
     "MutationOperators",
     "SelectionStrategies",
 ] 

@@ -1,17 +1,213 @@
 """
-main transformer architecture for weight-agnostic gpt-2
-supports both classification and generation tasks
+main transformer architecture for hybrid gpt-2 with weight-agnostic heads
+keeps original gpt-2 weights for transformer layers, only final heads are evolutionary
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, List, Tuple, Dict, Union
-from .layers import (
-    FixedEmbedding, PositionalEncoding, WannAttention, 
-    WannFeedForward, LayerNormFixed, SharedWeightLinear
-)
+from transformers import GPT2Model, GPT2Config
+from .layers import SharedWeightLinear
 from .activations import ActivationType
+
+class HybridWannGPT(nn.Module):
+    """hybrid architecture: pretrained gpt-2 backbone + weight-agnostic heads"""
+    
+    def __init__(self, vocab_size: int, embed_dim: int = 768, 
+                 num_layers: int = 12, num_heads: int = 12,
+                 max_length: int = 1024, dropout: float = 0.1,
+                 num_classes: int = None, model_name: str = "gpt2",
+                 freeze_backbone: bool = True):
+        super().__init__()
+        
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.max_length = max_length
+        self.num_classes = num_classes
+        self.freeze_backbone = freeze_backbone
+        
+        # load pretrained gpt-2 backbone
+        self.gpt2_config = GPT2Config(
+            vocab_size=vocab_size,
+            n_embd=embed_dim,
+            n_layer=num_layers,
+            n_head=num_heads,
+            n_positions=max_length,
+            resid_pdrop=dropout,
+            attn_pdrop=dropout,
+            embd_pdrop=dropout
+        )
+        
+        # try to load pretrained model, fallback to random initialization
+        try:
+            self.gpt2_backbone = GPT2Model.from_pretrained(
+                model_name, 
+                config=self.gpt2_config,
+                ignore_mismatched_sizes=True
+            )
+            print(f"loaded pretrained {model_name} weights")
+        except:
+            print(f"failed to load {model_name}, using random initialization")
+            self.gpt2_backbone = GPT2Model(self.gpt2_config)
+        
+        # freeze backbone if specified
+        if freeze_backbone:
+            for param in self.gpt2_backbone.parameters():
+                param.requires_grad = False
+            print("froze gpt-2 backbone parameters")
+        
+        # weight-agnostic output heads (these are evolutionary)
+        self._setup_output_heads()
+        
+        # shared weight parameter (only affects heads)
+        self.shared_weight = 1.0
+    
+    def _setup_output_heads(self):
+        """setup weight-agnostic output heads for different tasks"""
+        
+        # language modeling head (weight-agnostic)
+        self.lm_head = SharedWeightLinear(self.embed_dim, self.vocab_size, bias=False)
+        
+        # classification head (weight-agnostic, if num_classes specified)
+        if self.num_classes is not None:
+            self.classifier = SharedWeightLinear(self.embed_dim, self.num_classes, bias=False)
+        
+        # special tokens for classification
+        if self.num_classes is not None:
+            self.register_buffer("cls_token_id", torch.tensor(self.vocab_size - 1))
+    
+    def forward(self, input_ids: torch.Tensor, 
+                attention_mask: Optional[torch.Tensor] = None,
+                task: str = "generation") -> torch.Tensor:
+        """forward pass: gpt-2 backbone + weight-agnostic heads"""
+        
+        batch_size, seq_len = input_ids.shape
+        
+        # add [cls] token for classification
+        if task == "classification" and self.num_classes is not None:
+            # truncate input if needed to leave room for [cls] token
+            if seq_len >= self.max_length:
+                input_ids = input_ids[:, :(self.max_length - 1)]
+                if attention_mask is not None:
+                    attention_mask = attention_mask[:, :(self.max_length - 1)]
+                seq_len = input_ids.shape[1]
+            
+            cls_tokens = self.cls_token_id.expand(batch_size, 1).to(input_ids.device)
+            input_ids = torch.cat([input_ids, cls_tokens], dim=1)
+            seq_len += 1
+            
+            if attention_mask is not None:
+                cls_mask = torch.ones(batch_size, 1, device=attention_mask.device)
+                attention_mask = torch.cat([attention_mask, cls_mask], dim=1)
+        
+        # forward through gpt-2 backbone (keeps original weights)
+        outputs = self.gpt2_backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            return_dict=True
+        )
+        
+        hidden_states = outputs.last_hidden_state  # [batch, seq_len, embed_dim]
+        
+        # task-specific weight-agnostic heads
+        if task == "generation":
+            return self.lm_head(hidden_states, self.shared_weight)
+        elif task == "classification" and self.num_classes is not None:
+            # use [cls] token representation
+            cls_representation = hidden_states[:, -1, :]  # last token ([cls])
+            return self.classifier(cls_representation, self.shared_weight)
+        else:
+            raise ValueError(f"unsupported task: {task}")
+    
+    def generate(self, input_ids: torch.Tensor, max_new_tokens: int = 50,
+                temperature: float = 1.0, top_k: int = 50) -> torch.Tensor:
+        """generate text continuation"""
+        self.eval()
+        
+        with torch.no_grad():
+            for _ in range(max_new_tokens):
+                # forward pass
+                logits = self.forward(input_ids, task="generation")
+                
+                # get logits for last token
+                logits = logits[:, -1, :] / temperature
+                
+                # apply top-k filtering
+                if top_k > 0:
+                    indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
+                    logits[indices_to_remove] = float('-inf')
+                
+                # sample next token
+                probs = F.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                
+                # append to sequence
+                input_ids = torch.cat([input_ids, next_token], dim=1)
+                
+                # stop if max length reached
+                if input_ids.size(1) >= self.max_length:
+                    break
+        
+        return input_ids
+    
+    def set_shared_weight(self, weight: float):
+        """set shared weight parameter (only affects heads)"""
+        self.shared_weight = weight
+    
+    def get_total_complexity(self) -> int:
+        """get total complexity of weight-agnostic components (heads only)"""
+        complexity = 0
+        
+        # language modeling head complexity
+        complexity += self.lm_head.get_complexity()
+        
+        # classification head complexity (if exists)
+        if hasattr(self, 'classifier'):
+            complexity += self.classifier.get_complexity()
+        
+        return complexity
+    
+    def get_architecture_info(self) -> Dict[str, Union[int, float, List]]:
+        """get architecture information"""
+        return {
+            "vocab_size": self.vocab_size,
+            "embed_dim": self.embed_dim,
+            "num_layers": self.num_layers,
+            "num_heads": self.num_heads,
+            "max_length": self.max_length,
+            "num_classes": self.num_classes,
+            "shared_weight": self.shared_weight,
+            "total_complexity": self.get_total_complexity(),
+            "freeze_backbone": self.freeze_backbone,
+            "architecture_type": "hybrid_wann_gpt2"
+        }
+    
+    def clone(self) -> 'HybridWannGPT':
+        """create a copy of this model with same architecture"""
+        clone = HybridWannGPT(
+            vocab_size=self.vocab_size,
+            embed_dim=self.embed_dim,
+            num_layers=self.num_layers,
+            num_heads=self.num_heads,
+            max_length=self.max_length,
+            dropout=0.1,  # default
+            num_classes=self.num_classes,
+            freeze_backbone=self.freeze_backbone
+        )
+        
+        # copy head connection masks
+        clone.lm_head.connection_mask = self.lm_head.connection_mask.clone()
+        if hasattr(self, 'classifier') and hasattr(clone, 'classifier'):
+            clone.classifier.connection_mask = self.classifier.connection_mask.clone()
+        
+        # copy shared weight
+        clone.shared_weight = self.shared_weight
+        
+        return clone 
 
 class WannTransformerBlock(nn.Module):
     """single transformer block with shared weights and evolvable structure"""
@@ -22,6 +218,9 @@ class WannTransformerBlock(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim or 4 * embed_dim
+        
+        #load the other layers for compatibility
+        from .layers import WannAttention, WannFeedForward, LayerNormFixed, FixedEmbedding, PositionalEncoding
         
         # self-attention layer
         self.attention = WannAttention(embed_dim, num_heads, dropout, causal)
@@ -70,7 +269,7 @@ class WannTransformerBlock(nn.Module):
         """get total number of connections in this block"""
         complexity = 0
         if self.skip_attention > 0.5:
-            # count attention connections
+            #count attention connections
             complexity += (self.attention.q_proj.get_complexity() + 
                          self.attention.k_proj.get_complexity() +
                          self.attention.v_proj.get_complexity() +
@@ -80,7 +279,7 @@ class WannTransformerBlock(nn.Module):
         return complexity
 
 class WannGPT(nn.Module):
-    """weight-agnostic gpt-2 transformer for classification and generation"""
+    """original weight-agnostic gpt-2 transformer for classification and generation"""
     
     def __init__(self, vocab_size: int, embed_dim: int = 512, 
                  num_layers: int = 6, num_heads: int = 8,
@@ -88,6 +287,9 @@ class WannGPT(nn.Module):
                  num_classes: int = None, embedding_type: str = "random",
                  causal: bool = True):
         super().__init__()
+        
+        #load the other layers for compatibility
+        from .layers import FixedEmbedding, PositionalEncoding
         
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
@@ -130,8 +332,8 @@ class WannGPT(nn.Module):
             self.classifier = SharedWeightLinear(self.embed_dim, self.num_classes, bias=False)
         
         # special token embeddings - use a valid token ID within vocab_size
-        # reserve the last token for [CLS]
-        self.register_buffer("cls_token_id", torch.tensor(self.vocab_size - 1))  # [CLS] token
+        # reserve the last token for [cls]
+        self.register_buffer("cls_token_id", torch.tensor(self.vocab_size - 1))  # [cls] token
     
     def forward(self, input_ids: torch.Tensor, 
                 attention_mask: Optional[torch.Tensor] = None,
@@ -140,16 +342,16 @@ class WannGPT(nn.Module):
         
         batch_size, seq_len = input_ids.shape
         
-        # add [CLS] token for classification
+        # add [cls] token for classification
         if task == "classification" and self.num_classes is not None:
-            # truncate input if needed to leave room for [CLS] token
+            # truncate input if needed to leave room for [cls] token
             if seq_len >= self.max_length:
                 input_ids = input_ids[:, :(self.max_length - 1)]
                 if attention_mask is not None:
                     attention_mask = attention_mask[:, :(self.max_length - 1)]
                 seq_len = input_ids.shape[1]
             
-            cls_tokens = self.cls_token_id.expand(batch_size, 1)
+            cls_tokens = self.cls_token_id.expand(batch_size, 1).to(input_ids.device)
             input_ids = torch.cat([input_ids, cls_tokens], dim=1)
             seq_len += 1
             
@@ -171,8 +373,8 @@ class WannGPT(nn.Module):
         if task == "generation":
             return self.lm_head(x, self.shared_weight)
         elif task == "classification" and self.num_classes is not None:
-            # use [CLS] token representation
-            cls_representation = x[:, -1, :]  # last token ([CLS])
+            # use [cls] token representation
+            cls_representation = x[:, -1, :]  # last token ([cls])
             return self.classifier(cls_representation, self.shared_weight)
         else:
             raise ValueError(f"unsupported task: {task}")
@@ -294,7 +496,7 @@ class WannGPT(nn.Module):
         clone.load_state_dict(self.state_dict())
         clone.shared_weight = self.shared_weight
         
-        return clone
+        return clone 
     
     def get_architecture_info(self) -> Dict[str, Union[int, float, List]]:
         """get detailed architecture information"""

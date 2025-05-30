@@ -8,12 +8,13 @@ import json
 import pickle
 import random
 import numpy as np
+import torch
 from typing import List, Dict, Optional, Tuple, Callable
 from dataclasses import dataclass
 from tqdm import tqdm
 import wandb
 
-from .genome import ArchitectureGenome
+from .genome import ArchitectureGenome, HeadOnlyGenome
 from .mutations import MutationOperators, SpecializedMutations
 from .selection import (
     SelectionStrategies, MultiObjectiveSelection, 
@@ -454,4 +455,335 @@ class EvolutionEngine:
         if fronts and fronts[0]:
             return [self.population[i] for i in fronts[0]]
         else:
-            return [] 
+            return []
+
+class HeadOnlyEvolutionEngine:
+    """specialized engine for evolving only output heads with frozen gpt-2 backbone"""
+    
+    def __init__(self, config: EvolutionConfig, evaluator: SharedWeightEvaluator,
+                 save_dir: str = "./head_evolution_results", model_name: str = "gpt2"):
+        self.config = config
+        self.evaluator = evaluator
+        self.save_dir = save_dir
+        self.model_name = model_name
+        
+        # create save directory
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # evolution components adapted for head-only evolution
+        self.multi_obj_selector = MultiObjectiveSelection(config.complexity_weight)
+        
+        # evolution state
+        self.population: List[HeadOnlyGenome] = []
+        self.generation = 0
+        self.evolution_history: List[GenerationStats] = []
+        self.best_individual: Optional[HeadOnlyGenome] = None
+        
+        # tracking
+        self.fitness_stagnation_count = 0
+        self.last_best_fitness = float('-inf')
+        
+        # logging
+        self.use_wandb = False
+    
+    def initialize_population(self, initialization_strategy: str = "mixed") -> List[HeadOnlyGenome]:
+        """initialize population with diverse head configurations"""
+        
+        population = []
+        
+        if initialization_strategy == "mixed":
+            # mix of dense and sparse heads
+            
+            # 30% fully dense heads
+            dense_count = max(1, (self.config.population_size * 3) // 10)
+            for _ in range(dense_count):
+                genome = HeadOnlyGenome.create_dense(
+                    self.config.embed_dim, self.config.vocab_size, self.config.num_classes)
+                population.append(genome)
+            
+            # 40% sparse heads with varying sparsity
+            sparse_count = max(1, (self.config.population_size * 4) // 10)
+            for _ in range(sparse_count):
+                sparsity = random.uniform(0.1, 0.7)
+                genome = HeadOnlyGenome.create_sparse(
+                    self.config.embed_dim, self.config.vocab_size, self.config.num_classes, sparsity)
+                population.append(genome)
+            
+            # 30% random connection patterns
+            remaining = self.config.population_size - len(population)
+            for _ in range(remaining):
+                genome = self._create_random_head_genome()
+                population.append(genome)
+        
+        elif initialization_strategy == "dense":
+            # start with dense heads
+            for _ in range(self.config.population_size):
+                genome = HeadOnlyGenome.create_dense(
+                    self.config.embed_dim, self.config.vocab_size, self.config.num_classes)
+                population.append(genome)
+        
+        elif initialization_strategy == "sparse":
+            # start with sparse heads
+            for _ in range(self.config.population_size):
+                sparsity = random.uniform(0.3, 0.8)
+                genome = HeadOnlyGenome.create_sparse(
+                    self.config.embed_dim, self.config.vocab_size, self.config.num_classes, sparsity)
+                population.append(genome)
+        
+        return population
+    
+    def _create_random_head_genome(self) -> HeadOnlyGenome:
+        """create genome with random head configuration"""
+        genome = HeadOnlyGenome(
+            embed_dim=self.config.embed_dim,
+            vocab_size=self.config.vocab_size,
+            num_classes=self.config.num_classes
+        )
+        
+        # random sparsity levels
+        genome.lm_head_sparsity = random.uniform(0.0, 0.8)
+        if genome.num_classes is not None:
+            genome.classifier_sparsity = random.uniform(0.0, 0.8)
+        
+        # generate random connection patterns
+        genome.randomize_connections()
+        
+        return genome
+    
+    def evaluate_population(self, population: List[HeadOnlyGenome],
+                           dataloader, task_type: str = "classification") -> List[HeadOnlyGenome]:
+        """evaluate population using hybrid models"""
+        
+        # convert head genomes to hybrid models and evaluate
+        results = []
+        for genome in tqdm(population, desc=f"evaluating generation {self.generation}"):
+            try:
+                # create hybrid model from head genome
+                model = self.evaluator.instantiate_hybrid_from_genome(
+                    genome, self.model_name, freeze_backbone=True)
+                
+                # evaluate model
+                if task_type == "classification":
+                    result = self.evaluator.evaluate_classification(model, dataloader)
+                elif task_type == "generation":
+                    result = self.evaluator.evaluate_generation(model, dataloader)
+                else:
+                    raise ValueError(f"unsupported task type: {task_type}")
+                
+                # update genome fitness
+                genome.set_fitness(task_type, result.mean_performance)
+                genome.generation = self.generation
+                results.append(result)
+                
+            except Exception as e:
+                print(f"evaluation failed for genome: {e}")
+                # assign low fitness for failed evaluations
+                genome.set_fitness(task_type, -1000.0)
+                results.append(None)
+        
+        return population
+    
+    def selection(self, population: List[HeadOnlyGenome],
+                 task_type: str = "classification") -> List[HeadOnlyGenome]:
+        """select head genomes for next generation"""
+        
+        num_select = self.config.population_size
+        
+        if self.config.selection_strategy == "tournament":
+            selected = []
+            for _ in range(num_select):
+                # tournament selection adapted for head genomes
+                tournament = random.sample(population, min(self.config.tournament_size, len(population)))
+                winner = max(tournament, key=lambda x: x.get_fitness(task_type))
+                selected.append(winner)
+        
+        elif self.config.selection_strategy == "weighted_sum":
+            # sort by combined score (fitness - complexity penalty)
+            scored_pop = []
+            for genome in population:
+                raw_fitness = genome.get_fitness(task_type)
+                complexity = genome.calculate_complexity()
+                
+                # normalize complexity penalty
+                max_complexity = self.config.embed_dim * (self.config.vocab_size + (genome.num_classes or 0))
+                normalized_complexity = complexity / max_complexity if max_complexity > 0 else 0.0
+                
+                # combined score with complexity penalty
+                combined_score = raw_fitness - self.config.complexity_weight * normalized_complexity
+                
+                scored_pop.append((combined_score, raw_fitness, complexity, genome))
+            
+            scored_pop.sort(key=lambda x: x[0], reverse=True)
+            selected = [genome for _, _, _, genome in scored_pop[:num_select]]
+            
+            # print top performers for debugging
+            if self.generation % 5 == 0:  # every 5 generations
+                print(f"\ntop 3 performers (gen {self.generation}):")
+                for i, (score, fitness, complexity, genome) in enumerate(scored_pop[:3]):
+                    sparsity = f"lm:{genome.lm_head_sparsity:.2f}, cls:{genome.classifier_sparsity:.2f}"
+                    print(f"  #{i+1}: score={score:.4f}, fitness={fitness:.4f}, complexity={complexity:,}, sparsity=({sparsity})")
+        
+        else:
+            # default to fitness-based selection with complexity consideration
+            def fitness_with_penalty(genome):
+                raw_fitness = genome.get_fitness(task_type)
+                complexity = genome.calculate_complexity()
+                max_complexity = self.config.embed_dim * (self.config.vocab_size + (genome.num_classes or 0))
+                normalized_complexity = complexity / max_complexity if max_complexity > 0 else 0.0
+                return raw_fitness - self.config.complexity_weight * normalized_complexity
+            
+            selected = sorted(population, key=fitness_with_penalty, reverse=True)[:num_select]
+        
+        return selected
+    
+    def reproduction(self, population: List[HeadOnlyGenome],
+                    task_type: str = "classification") -> List[HeadOnlyGenome]:
+        """create offspring through mutation and crossover"""
+        
+        # calculate offspring counts
+        num_elite = max(1, int(self.config.population_size * self.config.elitism_rate))
+        num_offspring = self.config.population_size - num_elite
+        
+        # elite individuals
+        elite = sorted(population, key=lambda x: x.get_fitness(task_type), reverse=True)[:num_elite]
+        
+        # create offspring
+        offspring = []
+        
+        for _ in range(num_offspring):
+            if random.random() < self.config.crossover_rate and len(population) > 1:
+                # crossover
+                parent1, parent2 = random.sample(population, 2)
+                child = parent1.crossover(parent2)
+            else:
+                # mutation only
+                parent = random.choice(population)
+                child = parent.clone()
+            
+            # apply diverse mutations with different probabilities
+            mutation_applied = False
+            
+            # sparsity mutations (most common)
+            if random.random() < self.config.mutation_rate:
+                child.mutate_sparsity(mutation_rate=0.4)
+                mutation_applied = True
+            
+            # aggressive sparsity changes (less common)
+            if random.random() < 0.15:  # 15% chance
+                # randomly increase or decrease sparsity significantly
+                if random.random() < 0.5:
+                    child.lm_head_sparsity = min(0.95, child.lm_head_sparsity + random.uniform(0.1, 0.3))
+                else:
+                    child.lm_head_sparsity = max(0.0, child.lm_head_sparsity - random.uniform(0.1, 0.3))
+                
+                if child.num_classes is not None:
+                    if random.random() < 0.5:
+                        child.classifier_sparsity = min(0.95, child.classifier_sparsity + random.uniform(0.1, 0.3))
+                    else:
+                        child.classifier_sparsity = max(0.0, child.classifier_sparsity - random.uniform(0.1, 0.3))
+                mutation_applied = True
+            
+            # connection pattern regeneration (least common but most disruptive)
+            if random.random() < 0.1:  # 10% chance to completely randomize connections
+                child.randomize_connections()
+                mutation_applied = True
+            
+            # selective connection mutations (medium frequency)
+            if random.random() < 0.25 and child.lm_head_connections:  # 25% chance
+                # flip some random connections in lm head
+                for i in range(len(child.lm_head_connections)):
+                    for j in range(len(child.lm_head_connections[i])):
+                        if random.random() < 0.05:  # 5% of connections get flipped
+                            child.lm_head_connections[i][j] = 1 - child.lm_head_connections[i][j]
+                mutation_applied = True
+            
+            if random.random() < 0.25 and child.classifier_connections:  # 25% chance
+                # flip some random connections in classifier
+                for i in range(len(child.classifier_connections)):
+                    for j in range(len(child.classifier_connections[i])):
+                        if random.random() < 0.05:  # 5% of connections get flipped
+                            child.classifier_connections[i][j] = 1 - child.classifier_connections[i][j]
+                mutation_applied = True
+            
+            # ensure at least one mutation is applied
+            if not mutation_applied:
+                child.mutate_sparsity(mutation_rate=0.2)
+            
+            offspring.append(child)
+        
+        return elite + offspring
+    
+    def evolve(self, dataloader, task_type: str = "classification",
+              initialization_strategy: str = "mixed",
+              log_wandb: bool = False) -> HeadOnlyGenome:
+        """run head-only evolution"""
+        
+        self.use_wandb = log_wandb
+        
+        # initialize population
+        print("initializing head population...")
+        self.population = self.initialize_population(initialization_strategy)
+        
+        for generation in range(self.config.num_generations):
+            self.generation = generation
+            print(f"\ngeneration {generation + 1}/{self.config.num_generations}")
+            
+            # evaluate population
+            self.population = self.evaluate_population(self.population, dataloader, task_type)
+            
+            # track best individual
+            current_best = max(self.population, key=lambda x: x.get_fitness(task_type))
+            if self.best_individual is None or current_best.get_fitness(task_type) > self.best_individual.get_fitness(task_type):
+                self.best_individual = current_best.clone()
+                self.fitness_stagnation_count = 0
+            else:
+                self.fitness_stagnation_count += 1
+            
+            # log progress
+            best_fitness = current_best.get_fitness(task_type)
+            mean_fitness = np.mean([g.get_fitness(task_type) for g in self.population])
+            best_complexity = current_best.calculate_complexity()
+            
+            print(f"best fitness: {best_fitness:.4f}, mean: {mean_fitness:.4f}, complexity: {best_complexity}")
+            
+            # early stopping
+            if self.fitness_stagnation_count >= self.config.fitness_stagnation_threshold:
+                print(f"early stopping: fitness stagnated for {self.fitness_stagnation_count} generations")
+                break
+            
+            # selection and reproduction
+            if generation < self.config.num_generations - 1:
+                selected = self.selection(self.population, task_type)
+                self.population = self.reproduction(selected, task_type)
+            
+            # save checkpoint
+            if generation % 10 == 0:
+                self.save_checkpoint(generation)
+        
+        print(f"\nevolution completed. best fitness: {self.best_individual.get_fitness(task_type):.4f}")
+        self.save_results()
+        
+        return self.best_individual
+    
+    def save_checkpoint(self, generation: int):
+        """save evolution checkpoint"""
+        checkpoint = {
+            'generation': generation,
+            'population': [genome.to_dict() for genome in self.population],
+            'best_individual': self.best_individual.to_dict() if self.best_individual else None,
+            'fitness_stagnation_count': self.fitness_stagnation_count
+        }
+        
+        checkpoint_path = os.path.join(self.save_dir, f"checkpoint_gen_{generation}.pkl")
+        with open(checkpoint_path, 'wb') as f:
+            pickle.dump(checkpoint, f)
+    
+    def save_results(self):
+        """save final evolution results"""
+        if self.best_individual:
+            # save best individual
+            best_path = os.path.join(self.save_dir, "best_head_genome.json")
+            with open(best_path, 'w') as f:
+                json.dump(self.best_individual.to_dict(), f, indent=2)
+            
+            print(f"saved best head genome to {best_path}") 

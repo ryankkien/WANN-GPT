@@ -9,10 +9,10 @@ __version__ = "0.2.0"
 __author__ = "Research Team"
 
 # core architecture
-from .architecture import WannGPT, WannTransformerBlock
+from .architecture import WannGPT, WannTransformerBlock, HybridWannGPT
 
 # evolution components
-from .evolution import EvolutionEngine, ArchitectureGenome
+from .evolution import EvolutionEngine, ArchitectureGenome, HeadOnlyGenome, HeadOnlyEvolutionEngine
 
 # evaluation system
 from .evaluation import SharedWeightEvaluator
@@ -35,11 +35,14 @@ from .config import (
 __all__ = [
     # core architecture
     "WannGPT",
+    "HybridWannGPT",
     "WannTransformerBlock", 
     
     # evolution system
     "EvolutionEngine",
+    "HeadOnlyEvolutionEngine",
     "ArchitectureGenome",
+    "HeadOnlyGenome",
     
     # evaluation
     "SharedWeightEvaluator",
