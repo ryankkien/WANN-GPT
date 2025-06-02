@@ -144,11 +144,10 @@ def create_h100_maxed_config():
     config.data.task_type = "generation"  # set to generation task
     config.data.dataset_name = "wikitext"  # better dataset for generation
     
-    # aggressive weight sampling for thorough evaluation
+    # thorough weight sampling
     config.evolution.weight_samples = [
-        -4.0, -3.5, -3.0, -2.5, -2.0, -1.5, -1.0, -0.5, -0.25, 
-        0.0, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0
-    ]  # increased to 19 weight samples for thorough evaluation
+        -3, -2, -1, 0, 1, 2, 3
+    ]
     
     # training optimizations for h100
     config.training.parallel_evaluation = True
