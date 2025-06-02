@@ -114,7 +114,7 @@ def create_h100_maxed_config():
     #evolution settings - optimized for 80gb memory limit
     config.evolution.embed_dim = 1536
     config.evolution.vocab_size = 50257
-    config.evolution.population_size = 100  # drastically reduced from 400 to fit in memory
+    config.evolution.population_size = 25  # drastically reduced from 400 to fit in memory
     config.evolution.num_generations = 100  # keep extensive evolution time
     config.evolution.complexity_weight = 0.0001  # allow complex architectures
     config.evolution.mutation_rate = 0.2  # higher mutation for exploration
@@ -138,7 +138,7 @@ def create_h100_maxed_config():
     config.evolution.num_layers = 24  # explicitly set for headonlygenome
     
     # maximize batch size for h100 memory - aggressive scaling since only using 4.6gb/81gb
-    config.data.batch_size = 512  # massive increase from 64 (8x larger)
+    config.data.batch_size = 32  # massive increase from 64 (8x larger)
     config.data.max_length = 2048  # long sequences
     config.data.subset_size = 100000  # double dataset size for robust training
     config.data.task_type = "generation"  # set to generation task
@@ -153,7 +153,7 @@ def create_h100_maxed_config():
     # training optimizations for h100
     config.training.parallel_evaluation = True
     config.training.device = "cuda"
-    config.training.mixed_precision = True  # use fp16 for speed
+    config.training.mixed_precision = False  # disable mixed precision`n    config.training.use_fp16 = True  # use pure fp16 throughout
     config.training.gradient_checkpointing = True  # save memory
     
     return config
@@ -174,7 +174,7 @@ def create_h100_conservative_config():
     # moderate evolution settings
     config.evolution.embed_dim = 1536
     config.evolution.vocab_size = 50257
-    config.evolution.population_size = 150  # 3x default
+    config.evolution.population_size = 20  # 3x default
     config.evolution.num_generations = 75
     config.evolution.complexity_weight = 0.0002
     config.evolution.mutation_rate = 0.18
@@ -208,12 +208,12 @@ def create_h100_conservative_config():
     # training optimizations
     config.training.parallel_evaluation = True
     config.training.device = "cuda"
-    config.training.mixed_precision = True
+    config.training.mixed_precision = False  # disable mixed precision`n    config.training.use_fp16 = True  # use pure fp16 throughout
     config.training.gradient_checkpointing = True
     
     return config
 
-def run_h100_maxed_evolution(dataset_name="imdb"):
+def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="wann-gpt-h100-evolution"):
     """run maximum performance evolution on h100"""
     
     print("=" * 80)
@@ -231,12 +231,12 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
             wandb.login(key=wandb_api_key)
         
         wandb.init(
-            project="wann-gpt-h100-evolution",
-            name=f"h100-maxed-{dataset_name}-{int(time.time())}",
-            tags=["h100", "maxed", "evolution", dataset_name],
+            project=wandb_project,
+            name=f"h100-{mode}-{dataset_name}-{int(time.time())}",
+            tags=["h100", mode, "evolution", dataset_name],
             config={
                 "dataset": dataset_name,
-                "mode": "h100_maxed",
+                "mode": mode,
                 "gpu_type": "h100" if torch.cuda.is_available() else "cpu"
             }
         )
@@ -268,7 +268,7 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
         return
     
     # create h100 optimized config
-    config = create_h100_maxed_config()
+    config = create_h100_maxed_config() if mode == "maxed" else create_h100_conservative_config()
     
     #log configuration to wandb
     config_dict = {
@@ -292,7 +292,7 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
         "evolution/complexity_weight": config.evolution.complexity_weight
     }
     if use_wandb:
-        wandb.config.update(config_dict)
+        wandb.config.update(config_dict, allow_val_change=True)
     
     print(f"\nh100 configuration:")
     print(f"  embed dimension: {config.model.embed_dim}")
@@ -340,8 +340,9 @@ def run_h100_maxed_evolution(dataset_name="imdb"):
     # create h100 optimized evaluator
     evaluator = SharedWeightEvaluator(device="cuda")
     evaluator.default_weight_samples = config.evolution.weight_samples
-    evaluator.use_mixed_precision = True  # fp16 for speed
-    evaluator.parallel_evaluation = True  # use all cores
+    evaluator.use_mixed_precision = False  # fp16 for speed
+    evaluator.parallel_evaluation = False  # disable parallel to save memory
+    evaluator.clear_cache_after_eval = True  # clear cuda cache after each evaluation
     
     # create evolution engine with h100 optimizations
     evolution_engine = HeadOnlyEvolutionEngine(
@@ -505,7 +506,7 @@ def estimate_h100_memory_usage(config):
     total_model_params = embed_params + attention_params + ffn_params
     
     #memory per model (including gradients and optimizer states)
-    memory_per_model_gb = total_model_params * 4 * 3 / 1e9  # params + gradients + optimizer states
+    memory_per_model_gb = total_model_params * 2 * 3 / 1e9  # fp16: 2 bytes per param + gradients + optimizer states
     
     #batch memory
     batch_memory_gb = (config.data.batch_size * config.data.max_length * config.model.embed_dim * 4) / 1e9
@@ -558,35 +559,11 @@ if __name__ == "__main__":
     else:
         if args.mode == "conservative":
             print("running h100 conservative evolution...")
-            #initialize wandb for conservative mode
-            if not args.no_wandb:
-                wandb.init(
-                    project=args.wandb_project,
-                    name=f"h100-conservative-{args.dataset}-{int(time.time())}",
-                    tags=["h100", "conservative", "evolution", args.dataset],
-                    config={
-                        "dataset": args.dataset,
-                        "mode": "h100_conservative",
-                        "gpu_type": "h100" if torch.cuda.is_available() else "cpu"
-                    }
-                )
-            
+            #for conservative mode, we pass the mode to the function instead of double-initializing wandb
             config = create_h100_conservative_config()
             print(f"conservative config - batch size: {config.data.batch_size}, population: {config.evolution.population_size}")
             
-            #log conservative config
-            if not args.no_wandb:
-                conservative_config_dict = {
-                    "model/embed_dim": config.model.embed_dim,
-                    "model/vocab_size": config.model.vocab_size,
-                    "model/num_layers": config.model.num_layers,
-                    "model/num_heads": config.model.num_heads,
-                    "evolution/population_size": config.evolution.population_size,
-                    "data/batch_size": config.data.batch_size
-                }
-                wandb.config.update(conservative_config_dict)
-            
-        best_genome, benchmark = run_h100_maxed_evolution(args.dataset)
+        best_genome, benchmark = run_h100_maxed_evolution(args.dataset, mode=args.mode, wandb_project=args.wandb_project)
         print(f"\nh100 evolution completed successfully!")
         print(f"results saved to ./h100_maxed_results/")
         print(f"benchmarks saved to ./h100_benchmark_results/") 
