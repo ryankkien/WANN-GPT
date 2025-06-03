@@ -43,13 +43,34 @@ class HybridWannGPT(nn.Module):
         
         # try to load pretrained model, fallback to random initialization
         try:
-            self.gpt2_backbone = GPT2Model.from_pretrained(
-                model_name, 
-                config=self.gpt2_config,
-                ignore_mismatched_sizes=True
-            )
+            import warnings
+            import sys
+            from io import StringIO
+            
+            # temporarily suppress warnings and stdout to hide size mismatch messages
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            sys.stdout = StringIO()
+            sys.stderr = StringIO()
+            
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.gpt2_backbone = GPT2Model.from_pretrained(
+                    model_name, 
+                    config=self.gpt2_config,
+                    ignore_mismatched_sizes=True
+                )
+            
+            # restore stdout/stderr
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+            
             print(f"loaded pretrained {model_name} weights")
         except:
+            # restore stdout/stderr in case of exception
+            if 'old_stdout' in locals():
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
             print(f"failed to load {model_name}, using random initialization")
             self.gpt2_backbone = GPT2Model(self.gpt2_config)
         

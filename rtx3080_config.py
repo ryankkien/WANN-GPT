@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-h100 maximum performance configuration for wann-gpt
-optimized for 80gb h100 gpu memory and high performance
+rtx 3080 optimized configuration for wann-gpt
+optimized for 10gb rtx 3080 gpu memory and good performance
 """
 
 import torch
@@ -98,145 +98,146 @@ class SystemMonitor:
                 
             time.sleep(self.log_interval)
 
-def create_h100_maxed_config():
-    """create h100 optimized configuration for maximum performance within 80gb memory limit"""
+def create_rtx3080_config():
+    """create rtx 3080 optimized configuration for 10gb memory limit"""
     
-    config = ConfigPresets.generation_large()  # switch to generation preset
+    config = ConfigPresets.generation_large()
     
-    #model architecture - balanced for memory efficiency
-    config.model.embed_dim = 1536  # reduced from 2048 to save memory
-    config.model.vocab_size = 50257  # full gpt-2 vocabulary
-    config.model.num_layers = 20  # reduced from 24
-    config.model.num_heads = 24  # reduced from 32 (1536/24 = 64 per head)
-    config.model.max_length = 1024  # reduced from 2048 for memory
-    config.model.causal = True  # ensure causal masking for generation
+    #model architecture - scaled for 10gb memory
+    config.model.embed_dim = 768  #reduced from 1536 to save significant memory
+    config.model.vocab_size = 50257  #full gpt-2 vocabulary
+    config.model.num_layers = 12  #reduced from 20 for memory efficiency
+    config.model.num_heads = 12  #768/12 = 64 per head (standard gpt-2 ratio)
+    config.model.max_length = 512  #reduced from 1024 for memory
+    config.model.causal = True  #ensure causal masking for generation
     
-    #evolution settings - optimized for 80gb memory limit
-    config.evolution.embed_dim = 1536
+    #evolution settings - optimized for 10gb memory limit
+    config.evolution.embed_dim = 768
     config.evolution.vocab_size = 50257
-    config.evolution.population_size = 25  # drastically reduced from 400 to fit in memory
-    config.evolution.num_generations = 100  # keep extensive evolution time
-    config.evolution.complexity_weight = 0.0001  # allow complex architectures
-    config.evolution.mutation_rate = 0.2  # higher mutation for exploration
-    config.evolution.crossover_rate = 0.8  # high crossover for mixing
-    config.evolution.elitism_rate = 0.1  # preserve 10% best individuals (10 out of 100)
-    config.evolution.tournament_size = 5  # higher selection pressure
-    config.evolution.fitness_stagnation_threshold = 25  # longer patience
-    config.evolution.max_layers = 24  # reduced from 32
-    config.evolution.max_heads = 48  # reduced from 64
-    config.evolution.parallel_evaluation = False  # disable parallel to save memory
-    config.evolution.selection_strategy = "tournament"  # use tournament selection for head evolution
+    config.evolution.population_size = 8  #small population to fit in memory
+    config.evolution.num_generations = 50  #moderate evolution time
+    config.evolution.complexity_weight = 0.0002  #allow some complexity
+    config.evolution.mutation_rate = 0.25  #higher mutation for exploration with small population
+    config.evolution.crossover_rate = 0.7  #moderate crossover
+    config.evolution.elitism_rate = 0.25  #preserve 25% best (2 out of 8)
+    config.evolution.tournament_size = 3  #smaller tournament for small population
+    config.evolution.fitness_stagnation_threshold = 15  #moderate patience
+    config.evolution.max_layers = 16  #reduced from 24
+    config.evolution.max_heads = 24  #reduced from 48
+    config.evolution.parallel_evaluation = False  #disable parallel to save memory
+    config.evolution.selection_strategy = "tournament"
     
-    #memory management flags
-    config.evolution.clear_cache_between_evals = True  # clear cuda cache between evaluations
-    config.evolution.sequential_evaluation = True  # evaluate one genome at a time
+    #memory management flags - critical for rtx 3080
+    config.evolution.clear_cache_between_evals = True  #clear cuda cache between evaluations
+    config.evolution.sequential_evaluation = True  #evaluate one genome at a time
     
-    # fix num_heads for headonlygenome compatibility
-    # gpt-2 uses 768 embed_dim with 12 heads (768/12=64 per head)
-    # for 2048 embed_dim, valid num_heads could be: 16 (128 per head), 32 (64 per head), or 64 (32 per head)
-    config.evolution.num_heads = 32  # set to 32 so 2048/32 = 64 per head
-    config.evolution.num_layers = 24  # explicitly set for headonlygenome
+    #fix num_heads for headonlygenome compatibility
+    config.evolution.num_heads = 12  #768/12 = 64 per head
+    config.evolution.num_layers = 12  #explicitly set for headonlygenome
     
-    # maximize batch size for h100 memory - aggressive scaling since only using 4.6gb/81gb
-    config.data.batch_size = 32  # massive increase from 64 (8x larger)
-    config.data.max_length = 2048  # long sequences
-    config.data.subset_size = 100000  # double dataset size for robust training
-    config.data.task_type = "generation"  # set to generation task
-    config.data.dataset_name = "wikitext"  # better dataset for generation
+    #conservative batch size for 10gb memory
+    config.data.batch_size = 8  #small batch size to fit in memory
+    config.data.max_length = 512  #shorter sequences
+    config.data.subset_size = 25000  #smaller dataset for faster training
+    config.data.task_type = "generation"
+    config.data.dataset_name = "wikitext"
     
-    # thorough weight sampling
+    #moderate weight sampling
     config.evolution.weight_samples = [
-        -3, -2, -1, 0, 1, 2, 3
+        -2, -1, -0.5, 0, 0.5, 1, 2
     ]
     
-    # training optimizations for h100
-    config.training.parallel_evaluation = True
+    #training optimizations for rtx 3080
+    config.training.parallel_evaluation = False  #disable to save memory
     config.training.device = "cuda"
-    config.training.mixed_precision = False  # disable mixed precision`n    config.training.use_fp16 = True  # use pure fp16 throughout
-    config.training.gradient_checkpointing = True  # save memory
+    config.training.mixed_precision = True  #enable mixed precision for memory savings
+    config.training.use_fp16 = True  #use fp16 throughout
+    config.training.gradient_checkpointing = True  #save memory
     
     return config
 
-def create_h100_conservative_config():
-    """create conservative h100 configuration for gradual scaling"""
+def create_rtx3080_conservative_config():
+    """create ultra-conservative rtx 3080 configuration for guaranteed fit"""
     
-    config = ConfigPresets.generation_large()  # switch to generation
+    config = ConfigPresets.generation_large()
     
-    # moderate scaling for h100
-    config.model.embed_dim = 1536  # larger but not maxed
-    config.model.vocab_size = 50257  # full gpt-2 vocabulary
-    config.model.num_layers = 18  # deeper than default
-    config.model.num_heads = 24  # more heads
-    config.model.max_length = 1536  # longer sequences
-    config.model.causal = True  # ensure causal masking for generation
+    #ultra-conservative scaling for rtx 3080
+    config.model.embed_dim = 512  #very small for guaranteed fit
+    config.model.vocab_size = 50257
+    config.model.num_layers = 8  #shallow network
+    config.model.num_heads = 8  #512/8 = 64 per head
+    config.model.max_length = 256  #short sequences
+    config.model.causal = True
     
-    # moderate evolution settings
-    config.evolution.embed_dim = 1536
+    #minimal evolution settings
+    config.evolution.embed_dim = 512
     config.evolution.vocab_size = 50257
-    config.evolution.population_size = 20  # 3x default
-    config.evolution.num_generations = 75
-    config.evolution.complexity_weight = 0.0002
-    config.evolution.mutation_rate = 0.18
-    config.evolution.crossover_rate = 0.75
-    config.evolution.elitism_rate = 0.1  # preserve 10% best individuals (15 out of 150)
-    config.evolution.tournament_size = 4
-    config.evolution.fitness_stagnation_threshold = 20
-    config.evolution.max_layers = 24
-    config.evolution.max_heads = 48
-    config.evolution.parallel_evaluation = True
-    config.evolution.selection_strategy = "tournament"  # use tournament selection for head evolution
+    config.evolution.population_size = 4  #tiny population
+    config.evolution.num_generations = 25  #short evolution
+    config.evolution.complexity_weight = 0.0005
+    config.evolution.mutation_rate = 0.3
+    config.evolution.crossover_rate = 0.6
+    config.evolution.elitism_rate = 0.5  #preserve 50% (2 out of 4)
+    config.evolution.tournament_size = 2
+    config.evolution.fitness_stagnation_threshold = 10
+    config.evolution.max_layers = 12
+    config.evolution.max_heads = 16
+    config.evolution.parallel_evaluation = False
+    config.evolution.selection_strategy = "tournament"
     
-    # fix num_heads for headonlygenome compatibility
-    # for 1536 embed_dim: valid num_heads are 12 (128 per head), 16 (96), 24 (64), 32 (48), 48 (32)
-    config.evolution.num_heads = 24  # set to 24 so 1536/24 = 64 per head
-    config.evolution.num_layers = 18  # explicitly set for headonlygenome
+    #memory management
+    config.evolution.clear_cache_between_evals = True
+    config.evolution.sequential_evaluation = True
     
-    # conservative but substantial batch size increase
-    config.data.batch_size = 256  # 4x increase from current
-    config.data.max_length = 1536
-    config.data.subset_size = 75000
-    config.data.task_type = "generation"  # set to generation task
-    config.data.dataset_name = "wikitext"  # better dataset for generation
+    #fix num_heads for headonlygenome compatibility
+    config.evolution.num_heads = 8  #512/8 = 64 per head
+    config.evolution.num_layers = 8
     
-    # thorough weight sampling
+    #minimal batch size
+    config.data.batch_size = 4  #very small batch
+    config.data.max_length = 256
+    config.data.subset_size = 10000  #small dataset
+    config.data.task_type = "generation"
+    config.data.dataset_name = "wikitext"
+    
+    #simple weight sampling
     config.evolution.weight_samples = [
-        -3.5, -2.5, -1.5, -1.0, -0.5, -0.25, 
-        0.0, 0.25, 0.5, 1.0, 1.5, 2.5, 3.5
+        -1, 0, 1
     ]
     
-    # training optimizations
-    config.training.parallel_evaluation = True
+    #training optimizations
+    config.training.parallel_evaluation = False
     config.training.device = "cuda"
-    config.training.mixed_precision = False  # disable mixed precision`n    config.training.use_fp16 = True  # use pure fp16 throughout
+    config.training.mixed_precision = True
+    config.training.use_fp16 = True
     config.training.gradient_checkpointing = True
     
     return config
 
-def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="wann-gpt-h100-evolution"):
-    """run maximum performance evolution on h100"""
+def run_rtx3080_evolution(dataset_name="wikitext", mode="standard", wandb_project="wann-gpt-rtx3080-evolution"):
+    """run rtx 3080 optimized evolution"""
     
     print("=" * 80)
-    print("H100 MAXIMUM PERFORMANCE EVOLUTION")
+    print("RTX 3080 OPTIMIZED EVOLUTION")
     print("=" * 80)
     
-    #check if wandb is disabled - fix the logic
+    #check if wandb is disabled
     use_wandb = os.getenv("WANDB_MODE") != "disabled"
     
     #initialize wandb
     if use_wandb:
-        #optionally set api key if provided via environment variable
         wandb_api_key = os.getenv("WANDB_API_KEY")
         if wandb_api_key:
             wandb.login(key=wandb_api_key)
         
         wandb.init(
             project=wandb_project,
-            name=f"h100-{mode}-{dataset_name}-{int(time.time())}",
-            tags=["h100", mode, "evolution", dataset_name],
+            name=f"rtx3080-{mode}-{dataset_name}-{int(time.time())}",
+            tags=["rtx3080", mode, "evolution", dataset_name],
             config={
                 "dataset": dataset_name,
                 "mode": mode,
-                "gpu_type": "h100" if torch.cuda.is_available() else "cpu"
+                "gpu_type": "rtx3080" if torch.cuda.is_available() else "cpu"
             }
         )
         print(f"✓ wandb initialized: {wandb.run.name}")
@@ -249,7 +250,7 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
     monitor = SystemMonitor(log_interval=30, use_wandb=use_wandb)
     monitor.start_monitoring()
     
-    # check gpu specs
+    #check gpu specs
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
         gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
@@ -271,8 +272,8 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
             wandb.config.update({"gpu_available": False})
         return
     
-    # create h100 optimized config
-    config = create_h100_maxed_config() if mode == "maxed" else create_h100_conservative_config()
+    #create rtx 3080 optimized config
+    config = create_rtx3080_config() if mode == "standard" else create_rtx3080_conservative_config()
     
     #log configuration to wandb
     config_dict = {
@@ -298,7 +299,7 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
     if use_wandb:
         wandb.config.update(config_dict, allow_val_change=True)
     
-    print(f"\nh100 configuration:")
+    print(f"\nrtx 3080 configuration:")
     print(f"  embed dimension: {config.model.embed_dim}")
     print(f"  vocabulary size: {config.model.vocab_size:,}")
     print(f"  max layers: {config.model.num_layers}")
@@ -310,23 +311,21 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
     print(f"  dataset size: {config.data.subset_size:,} samples")
     print(f"  weight samples: {len(config.evolution.weight_samples)} points")
     
-    # estimate memory usage
-    estimated_memory = estimate_h100_memory_usage(config)
+    #estimate memory usage
+    estimated_memory = estimate_rtx3080_memory_usage(config)
     print(f"  estimated memory: {estimated_memory:.1f} gb")
     if use_wandb:
         wandb.log({"config/estimated_memory_gb": estimated_memory})
     
-    # load large dataset
+    #load dataset
     print(f"\nloading {dataset_name} dataset...")
-    train_loader, test_loader = load_generation_data(  # generation doesn't return num_classes
+    train_loader, test_loader = load_generation_data(
         dataset_name=dataset_name,
         vocab_size=config.model.vocab_size,
         max_length=config.model.max_length,
         batch_size=config.data.batch_size,
         subset_size=config.data.subset_size
     )
-    
-    # no need to set num_classes for generation tasks
     
     print(f"dataset loaded:")
     print(f"  train batches: {len(train_loader):,}")
@@ -341,18 +340,18 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
             "dataset/task_type": "text_generation"
         })
     
-    # create h100 optimized evaluator
+    #create rtx 3080 optimized evaluator
     evaluator = SharedWeightEvaluator(device="cuda")
     evaluator.default_weight_samples = config.evolution.weight_samples
-    evaluator.use_mixed_precision = False  # fp16 for speed
-    evaluator.parallel_evaluation = False  # disable parallel to save memory
-    evaluator.clear_cache_after_eval = True  # clear cuda cache after each evaluation
+    evaluator.use_mixed_precision = True  #enable mixed precision for memory savings
+    evaluator.parallel_evaluation = False  #disable parallel to save memory
+    evaluator.clear_cache_after_eval = True  #clear cuda cache after each evaluation
     
-    # create evolution engine with h100 optimizations
+    #create evolution engine with rtx 3080 optimizations
     evolution_engine = HeadOnlyEvolutionEngine(
         config=config.evolution,
         evaluator=evaluator,
-        save_dir="./h100_maxed_results",
+        save_dir="./rtx3080_results",
         model_name="gpt2"
     )
     
@@ -408,8 +407,8 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
     
     evolution_engine.evaluate_population = tracked_evaluate_population
     
-    # run maximum performance evolution
-    print(f"\nstarting h100 maximum performance evolution...")
+    #run rtx 3080 optimized evolution
+    print(f"\nstarting rtx 3080 optimized evolution...")
     estimated_runtime_hours = estimate_runtime(config)
     print(f"estimated runtime: {estimated_runtime_hours:.1f} hours")
     if use_wandb:
@@ -443,10 +442,10 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
                 "results/final_classifier_sparsity": best_genome.classifier_sparsity
             })
         
-        # comprehensive benchmarking
-        print(f"\nrunning h100 comprehensive benchmark...")
+        #comprehensive benchmarking
+        print(f"\nrunning rtx 3080 comprehensive benchmark...")
         
-        model = evaluator.instantiate_hybrid_from_genome(best_genome)  # use the correct method for hybrid models
+        model = evaluator.instantiate_hybrid_from_genome(best_genome)
         benchmark_suite = WannBenchmarkSuite(device="cuda")
         
         benchmark_result = benchmark_suite.comprehensive_benchmark(
@@ -454,7 +453,7 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
             test_loader=test_loader,
             task_type="generation",
             save_plots=True,
-            output_dir="./h100_benchmark_results"
+            output_dir="./rtx3080_benchmark_results"
         )
         
         print(f"benchmark completed!")
@@ -472,19 +471,19 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
             })
         
         #save genome and model files
-        torch.save(best_genome, "./h100_maxed_results/best_genome.pt")
-        torch.save(model.state_dict(), "./h100_maxed_results/best_model.pt")
+        torch.save(best_genome, "./rtx3080_results/best_genome.pt")
+        torch.save(model.state_dict(), "./rtx3080_results/best_model.pt")
         
         #save model artifact to wandb if enabled
         if use_wandb:
             model_artifact = wandb.Artifact(
-                name=f"h100-evolved-model-{dataset_name}",
+                name=f"rtx3080-evolved-model-{dataset_name}",
                 type="model",
-                description=f"best evolved model from h100 run on {dataset_name}"
+                description=f"best evolved model from rtx 3080 run on {dataset_name}"
             )
             
-            model_artifact.add_file("./h100_maxed_results/best_genome.pt")
-            model_artifact.add_file("./h100_maxed_results/best_model.pt")
+            model_artifact.add_file("./rtx3080_results/best_genome.pt")
+            model_artifact.add_file("./rtx3080_results/best_model.pt")
             wandb.log_artifact(model_artifact)
         
     except Exception as e:
@@ -500,48 +499,46 @@ def run_h100_maxed_evolution(dataset_name="imdb", mode="maxed", wandb_project="w
     
     return best_genome, benchmark_result
 
-def estimate_h100_memory_usage(config):
-    """estimate memory usage for h100 configuration with more accurate calculation"""
+def estimate_rtx3080_memory_usage(config):
+    """estimate memory usage for rtx 3080 configuration"""
     
     #model parameters
     embed_params = config.model.vocab_size * config.model.embed_dim
-    attention_params = config.model.num_layers * 4 * config.model.embed_dim * config.model.embed_dim  # q,k,v,o projections
-    ffn_params = config.model.num_layers * 2 * config.model.embed_dim * (4 * config.model.embed_dim)  # mlp layers
+    attention_params = config.model.num_layers * 4 * config.model.embed_dim * config.model.embed_dim
+    ffn_params = config.model.num_layers * 2 * config.model.embed_dim * (4 * config.model.embed_dim)
     total_model_params = embed_params + attention_params + ffn_params
     
-    #memory per model (including gradients and optimizer states)
-    memory_per_model_gb = total_model_params * 2 * 3 / 1e9  # fp16: 2 bytes per param + gradients + optimizer states
+    #memory per model (fp16 + gradients + optimizer states)
+    memory_per_model_gb = total_model_params * 2 * 3 / 1e9
     
     #batch memory
-    batch_memory_gb = (config.data.batch_size * config.data.max_length * config.model.embed_dim * 4) / 1e9
+    batch_memory_gb = (config.data.batch_size * config.data.max_length * config.model.embed_dim * 2) / 1e9  #fp16
     
-    #total memory estimate
-    #note: with sequential evaluation, we only keep one model active at a time
-    active_models = 1  # sequential evaluation
-    memory_gb = (memory_per_model_gb * active_models + batch_memory_gb) * 1.5  # 1.5x for overhead
+    #total memory estimate with overhead
+    active_models = 1  #sequential evaluation
+    memory_gb = (memory_per_model_gb * active_models + batch_memory_gb) * 1.3  #1.3x for overhead
     
     return memory_gb
 
 def estimate_runtime(config):
-    """estimate runtime in hours"""
+    """estimate runtime in hours for rtx 3080"""
     
-    # rough estimate based on config complexity
     complexity_factor = (
         config.evolution.population_size * 
         config.evolution.num_generations * 
         len(config.evolution.weight_samples) *
         config.model.num_layers
-    ) / 1000000
+    ) / 100000  #adjusted for rtx 3080 performance
     
-    return complexity_factor * 0.1  # rough hours estimate
+    return complexity_factor * 0.2  #rough hours estimate
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="run h100 maximum performance wann-gpt evolution")
+    parser = argparse.ArgumentParser(description="run rtx 3080 optimized wann-gpt evolution")
     parser.add_argument("--dataset", default="wikitext", help="dataset to use (wikitext, tiny_stories, etc.)")
-    parser.add_argument("--save-config", action="store_true", help="save h100 config to file")
-    parser.add_argument("--mode", choices=["maxed", "conservative"], default="maxed", 
-                       help="configuration mode: maxed (aggressive) or conservative (gradual scaling)")
-    parser.add_argument("--wandb-project", default="wann-gpt-h100-evolution", help="wandb project name")
+    parser.add_argument("--save-config", action="store_true", help="save rtx 3080 config to file")
+    parser.add_argument("--mode", choices=["standard", "conservative"], default="standard", 
+                       help="configuration mode: standard (balanced) or conservative (ultra-safe)")
+    parser.add_argument("--wandb-project", default="wann-gpt-rtx3080-evolution", help="wandb project name")
     parser.add_argument("--no-wandb", action="store_true", help="disable wandb logging")
     
     args = parser.parse_args()
@@ -552,22 +549,21 @@ if __name__ == "__main__":
         os.environ["WANDB_MODE"] = "disabled"
     
     if args.save_config:
-        if args.mode == "maxed":
-            config = create_h100_maxed_config()
-            config.save("h100_maxed_config.yaml")
-            print("h100 maxed configuration saved to h100_maxed_config.yaml")
+        if args.mode == "standard":
+            config = create_rtx3080_config()
+            config.save("rtx3080_config.yaml")
+            print("rtx 3080 standard configuration saved to rtx3080_config.yaml")
         else:
-            config = create_h100_conservative_config()
-            config.save("h100_conservative_config.yaml")
-            print("h100 conservative configuration saved to h100_conservative_config.yaml")
+            config = create_rtx3080_conservative_config()
+            config.save("rtx3080_conservative_config.yaml")
+            print("rtx 3080 conservative configuration saved to rtx3080_conservative_config.yaml")
     else:
         if args.mode == "conservative":
-            print("running h100 conservative evolution...")
-            #for conservative mode, we pass the mode to the function instead of double-initializing wandb
-            config = create_h100_conservative_config()
+            print("running rtx 3080 conservative evolution...")
+            config = create_rtx3080_conservative_config()
             print(f"conservative config - batch size: {config.data.batch_size}, population: {config.evolution.population_size}")
             
-        best_genome, benchmark = run_h100_maxed_evolution(args.dataset, mode=args.mode, wandb_project=args.wandb_project)
-        print(f"\nh100 evolution completed successfully!")
-        print(f"results saved to ./h100_maxed_results/")
-        print(f"benchmarks saved to ./h100_benchmark_results/") 
+        best_genome, benchmark = run_rtx3080_evolution(args.dataset, mode=args.mode, wandb_project=args.wandb_project)
+        print(f"\nrtx 3080 evolution completed successfully!")
+        print(f"results saved to ./rtx3080_results/")
+        print(f"benchmarks saved to ./rtx3080_benchmark_results/") 
